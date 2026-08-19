@@ -5,11 +5,11 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/install-laptop /dev/disk/by-id/<internal-nvme-id>
+  ./scripts/install-laptop
 
 This performs a FULL WIPE of one internal NVMe and installs the #laptop
 profile with GPT + EFI + LUKS2 + Btrfs. It only runs on an ASUS GA503QS and
-requires an exact /dev/disk/by-id path plus a typed destructive confirmation.
+continues only when it detects exactly one non-removable whole NVMe disk.
 EOF
 }
 
@@ -31,12 +31,11 @@ if [[ ${1:-} == "--help" || ${1:-} == "-h" ]]; then
   exit 0
 fi
 
-[[ $# -eq 1 ]] || {
+[[ $# -eq 0 ]] || {
   usage >&2
   exit 2
 }
 
-target=$1
 script_path=$(readlink -f -- "$0")
 repo_dir=$(cd -- "$(dirname -- "$script_path")/.." && pwd -P)
 
@@ -66,12 +65,48 @@ for command in git head lsblk nix nixos-generate-config readlink tar; do
   command -v "$command" >/dev/null 2>&1 || die "required command is missing: $command"
 done
 
-[[ $target == /dev/disk/by-id/* ]] || die "target must be an exact /dev/disk/by-id path"
-[[ $target != *-part[0-9]* ]] || die "target is a partition, not a whole disk: $target"
-[[ -L $target ]] || die "target is not a by-id symlink: $target"
+declare -A seen_devices=()
+declare -a candidate_ids=()
+declare -a candidate_devices=()
+shopt -s nullglob
 
-resolved=$(readlink -e -- "$target") || die "target does not resolve: $target"
-[[ -b $resolved ]] || die "resolved target is not a block device: $resolved"
+for by_id in /dev/disk/by-id/nvme-*; do
+  [[ $by_id != *-part[0-9]* ]] || continue
+  [[ -L $by_id ]] || continue
+
+  candidate=$(readlink -e -- "$by_id") || continue
+  [[ -b $candidate ]] || continue
+  [[ $(lsblk -dnro TYPE -- "$candidate" | tr -d '[:space:]') == disk ]] || continue
+  [[ $(lsblk -dnro TRAN -- "$candidate" | tr -d '[:space:]') == nvme ]] || continue
+  [[ $(lsblk -dnro RM -- "$candidate" | tr -d '[:space:]') == 0 ]] || continue
+  [[ -z ${seen_devices[$candidate]:-} ]] || continue
+
+  seen_devices[$candidate]=1
+  candidate_ids+=("$by_id")
+  candidate_devices+=("$candidate")
+done
+
+shopt -u nullglob
+
+if (( ${#candidate_devices[@]} == 0 )); then
+  die "no non-removable whole NVMe disk was detected"
+fi
+
+if (( ${#candidate_devices[@]} > 1 )); then
+  printf 'Multiple internal NVMe disks were detected; refusing to guess:\n' >&2
+  for index in "${!candidate_devices[@]}"; do
+    lsblk -dn -o PATH,SIZE,MODEL,SERIAL,TRAN,RM -- "${candidate_devices[$index]}" >&2
+    printf '  By ID: %s\n' "${candidate_ids[$index]}" >&2
+  done
+  die "automatic installation requires exactly one internal NVMe"
+fi
+
+target=${candidate_ids[0]}
+resolved=${candidate_devices[0]}
+
+[[ $target == /dev/disk/by-id/nvme-* ]] || die "auto-detected target is not an NVMe by-id path"
+[[ $target != *-part[0-9]* ]] || die "auto-detected target is a partition"
+[[ -L $target && -b $resolved ]] || die "auto-detected target is not a valid block-device symlink"
 
 device_type=$(lsblk -dnro TYPE -- "$resolved" | tr -d '[:space:]')
 transport=$(lsblk -dnro TRAN -- "$resolved" | tr -d '[:space:]')
