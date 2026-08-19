@@ -14,14 +14,23 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    disko = {
+      url = "github:nix-community/disko/latest";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    nixos-hardware = {
+      url = "github:NixOS/nixos-hardware";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     nix-darwin = {
       url = "github:nix-darwin/nix-darwin/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
   };
 
-  outputs = { nixpkgs, home-manager, stylix, nix-darwin, ... }:
+  outputs = { nixpkgs, home-manager, stylix, disko, nixos-hardware, nix-darwin, ... }:
     let
       labUserName = "retraut";
       macUserName = "retraut";
@@ -37,18 +46,27 @@
         specialArgs = { inherit labUserName; };
         modules = commonModules ++ hostModules;
       };
-      # The laptop's generated hardware file is intentionally optional: the
-      # same flake remains usable in the VM before the real laptop is scanned.
-      laptopHardware = nixpkgs.lib.optional
-        (builtins.pathExists ./hardware/laptop-configuration.nix)
-        ./hardware/laptop-configuration.nix;
     in {
       nixosConfigurations = {
         # Existing VM profile. Keep #nixos stable for the lab workflow.
         nixos = mkHost [ ./hosts/vm.nix ];
-        # Real laptop profile. Add hardware/laptop-configuration.nix after
-        # running nixos-generate-config on the laptop.
-        laptop = mkHost ([ ./hosts/laptop.nix ] ++ laptopHardware);
+        # Physical GA503QS profile: upstream hardware quirks plus a reusable,
+        # encrypted Disko layout. The installer replaces the placeholder
+        # hardware scan in its private installation snapshot.
+        laptop = mkHost [
+          disko.nixosModules.disko
+          nixos-hardware.nixosModules.asus-zephyrus-ga503
+          ./hosts/laptop.nix
+          ./hosts/laptop-disko.nix
+          ./hardware/laptop-configuration.nix
+        ];
+      };
+
+      # Pin the installer tooling to this flake.lock so the live-ISO script
+      # does not silently fetch a different Disko or nixpkgs revision.
+      packages.x86_64-linux = {
+        disko-install = disko.packages.x86_64-linux.disko-install;
+        mkpasswd = nixpkgs.legacyPackages.x86_64-linux.mkpasswd;
       };
 
       # Apple Silicon/macOS skeleton. Keep Linux desktop modules out of it.
