@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# hyprland-per-window-layout needs the physical keyboard names it should
+# control. Resolve the main keyboard at session start instead of hardcoding a
+# VM or laptop-specific device name.
+config_dir="$HOME/.config/hyprland-per-window-layout"
+config_file="$config_dir/options.toml"
+mkdir -p "$config_dir"
+
+keyboard_names="$(hyprctl -j devices 2>/dev/null | jq -c '[.keyboards[] | select(.main == true) | .name]')"
+if [[ -z "$keyboard_names" || "$keyboard_names" == "null" || "$keyboard_names" == "[]" ]]; then
+  keyboard_names='[]'
+fi
+printf 'keyboards = %s\n' "$keyboard_names" > "$config_file"
+
+exec hyprland-per-window-layout

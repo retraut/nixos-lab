@@ -1,0 +1,13 @@
+# Downloaded installer media is large and reproducible.
+.installer-cache/
+
+# Generated runtime/cache files.
+__pycache__/
+*.py[cod]
+
+# Local Nix build outputs.
+result
+result-*
+
+# Editor/OS noise.
+.DS_Store

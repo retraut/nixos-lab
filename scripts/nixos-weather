@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+weather_config="$HOME/.config/quickshell/weather.qml"
+mode="${1:-now}"
+
+# Ask the existing config first. This is more reliable than matching the
+# process command line, which is a store path on NixOS.
+if quickshell ipc --path "$weather_config" call nixos-weather "$mode" >/dev/null 2>&1; then
+  exit 0
+fi
+
+NIXOS_WEATHER_MODE="$mode" exec quickshell -n -p "$weather_config"

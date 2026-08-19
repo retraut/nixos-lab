@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Generate a private QR code for the active NetworkManager Wi-Fi profile."""
+
+import json
+import os
+import re
+import subprocess
+
+
+def run(args, *, secret=False):
+    command = ["nmcli"]
+    if secret:
+        command.append("--show-secrets")
+    command.extend(args)
+    result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    return result.returncode, result.stdout.strip(), result.stderr.strip()
+
+
+def split_nmcli(line):
+    fields, current, escaped = [], [], False
+    for char in line:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == ":":
+            fields.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    fields.append("".join(current))
+    return fields
+
+
+def fail(detail):
+    print(json.dumps({"ok": False, "detail": detail}))
+    raise SystemExit(1)
+
+
+code, active_rows, error = run([
+    "-t", "-e", "yes", "-f", "NAME,TYPE", "connection", "show", "--active"
+])
+if code:
+    fail(error or "Could not read active NetworkManager connections")
+
+connection = ""
+for line in active_rows.splitlines():
+    parts = split_nmcli(line)
+    if len(parts) >= 2 and parts[-1] in ("802-11-wireless", "wifi"):
+        connection = ":".join(parts[:-1])
+        break
+if not connection:
+    fail("Connect to Wi-Fi before creating a share code")
+
+_, ssid, _ = run(["-g", "802-11-wireless.ssid", "connection", "show", connection])
+_, key_mgmt, _ = run(["-g", "802-11-wireless-security.key-mgmt", "connection", "show", connection])
+_, hidden, _ = run(["-g", "802-11-wireless.hidden", "connection", "show", connection])
+secret_code, password, secret_error = run([
+    "-g", "802-11-wireless-security.psk", "connection", "show", connection
+], secret=True)
+
+ssid = ssid or connection
+key_mgmt = key_mgmt.lower()
+if key_mgmt and secret_code:
+    fail(secret_error or "NetworkManager did not allow reading this Wi-Fi password")
+
+
+def escape(value):
+    return re.sub(r'([\\;,:\"])', r'\\\1', value)
+
+
+if not key_mgmt:
+    auth = "nopass"
+elif "wep" in key_mgmt:
+    auth = "WEP"
+else:
+    auth = "WPA"
+
+payload = f"WIFI:T:{auth};S:{escape(ssid)};"
+if password:
+    payload += f"P:{escape(password)};"
+if hidden.lower() in ("yes", "true", "1"):
+    payload += "H:true;"
+payload += ";"
+
+runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+output_path = os.path.join(runtime_dir, "nixos-wifi-share.png")
+try:
+    result = subprocess.run(
+        ["qrencode", "-t", "PNG", "-s", "8", "-m", "2", "-o", output_path],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+except (OSError, subprocess.SubprocessError) as exception:
+    fail(str(exception))
+if result.returncode:
+    fail(result.stderr.strip() or "Could not generate QR code")
+
+os.chmod(output_path, 0o600)
+print(json.dumps({"ok": True, "path": output_path, "ssid": ssid}))

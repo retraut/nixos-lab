@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mode="${1:-region}"
+picture_root="${XDG_PICTURES_DIR:-$HOME/Pictures}"
+capture_dir="$picture_root/Screenshots"
+mkdir -p "$capture_dir"
+capture_path="$capture_dir/$(date +'%Y-%m-%d_%H-%M-%S').png"
+
+case "$mode" in
+  region)
+    geometry="$(slurp)" || exit 0
+    [[ -n "$geometry" ]] || exit 0
+    grim -g "$geometry" "$capture_path"
+    ;;
+  window)
+    geometry="$(hyprctl -j activewindow | jq -r '
+      if (.at and .size) then
+        "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"
+      else empty end
+    ')"
+    [[ -n "$geometry" ]] || exit 1
+    grim -g "$geometry" "$capture_path"
+    ;;
+  fullscreen)
+    grim "$capture_path"
+    ;;
+  *)
+    printf 'usage: %s {region|window|fullscreen}\n' "$0" >&2
+    exit 2
+    ;;
+esac
+
+wl-copy --type image/png < "$capture_path"
+notify-send -a nixos-action -i "$capture_path" "Screenshot saved" "$capture_path"
+printf '%s\n' "$capture_path"

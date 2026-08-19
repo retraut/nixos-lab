@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if pgrep -f "^quickshell -n -p $HOME/.config/quickshell/agents.qml$" >/dev/null; then
+  exit 0
+fi
+
+exec quickshell -n -p "$HOME/.config/quickshell/agents.qml"

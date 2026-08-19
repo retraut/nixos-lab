@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "--clear" ]]; then
+  cliphist wipe
+  notify-send -a nixos-action "Clipboard" "History cleared"
+  exit 0
+fi
+
+history="$(cliphist list 2>/dev/null || true)"
+if [[ -z "$history" ]]; then
+  notify-send -a nixos-action "Clipboard" "History is empty"
+  exit 0
+fi
+
+selection="$(printf '%s\n' "$history" | fuzzel --dmenu --prompt='Clipboard ❯  ')" || exit 0
+[[ -n "$selection" ]] || exit 0
+printf '%s' "$selection" | cliphist decode | wl-copy

@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Mutation helper for the NixOS Control Center.
+
+Arguments are passed as a list, never interpolated into a shell. Wi-Fi secrets
+are read from stdin so they do not appear in argv or process listings.
+"""
+
+import json
+import os
+import subprocess
+import sys
+
+
+def run(args, input_text=None, timeout=35):
+    try:
+        result = subprocess.run(args, input=input_text, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, str(error)
+    detail = (result.stderr or result.stdout).strip()
+    return result.returncode == 0, detail
+
+
+def wifi(action, args):
+    if action == "toggle":
+        current = subprocess.run(["nmcli", "-t", "-f", "WIFI", "general"], capture_output=True, text=True).stdout.strip()
+        return run(["nmcli", "radio", "wifi", "off" if current == "enabled" else "on"])
+    if action == "rescan":
+        return run(["nmcli", "device", "wifi", "rescan"])
+    if action == "connect" and args:
+        ssid = args[0]
+        secret = sys.stdin.readline().rstrip("\n")
+        command = ["nmcli", "--ask", "device", "wifi", "connect", ssid]
+        return run(command, (secret + "\n") if secret else "\n")
+    if action == "disconnect":
+        output = subprocess.run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device"], capture_output=True, text=True).stdout
+        for line in output.splitlines():
+            parts = line.split(":")
+            if len(parts) >= 3 and parts[1] == "wifi" and parts[2] == "connected":
+                return run(["nmcli", "device", "disconnect", parts[0]])
+        return True, "No connected Wi-Fi device"
+    if action == "forget" and args:
+        return run(["nmcli", "connection", "delete", "id", args[0]])
+    return False, "Unsupported Wi-Fi action"
+
+
+def bluetooth(action, args):
+    if action == "toggle":
+        show = subprocess.run(["bluetoothctl", "show"], capture_output=True, text=True).stdout
+        return run(["bluetoothctl", "power", "off" if "Powered: yes" in show else "on"])
+    if action == "scan":
+        return run(["bluetoothctl", "--timeout", "8", "scan", "on"], timeout=12)
+    if action in ("connect", "disconnect", "remove") and args:
+        return run(["bluetoothctl", action, args[0]], timeout=20)
+    return False, "Unsupported Bluetooth action"
+
+
+def audio(action, args):
+    if action == "output-volume" and args:
+        return run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{max(0, min(150, int(args[0])))}%"])
+    if action == "input-volume" and args:
+        return run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SOURCE@", f"{max(0, min(150, int(args[0])))}%"])
+    if action == "output-mute":
+        return run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])
+    if action == "input-mute":
+        return run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"])
+    if action == "default" and args:
+        return run(["wpctl", "set-default", str(int(args[0]))])
+    if action == "stream-volume" and len(args) >= 2:
+        return run(["wpctl", "set-volume", str(int(args[0])), f"{max(0, min(150, int(args[1])))}%"])
+    if action == "stream-mute" and args:
+        return run(["wpctl", "set-mute", str(int(args[0])), "toggle"])
+    return False, "Unsupported audio action"
+
+
+def display(action, args):
+    if action == "brightness" and args:
+        return run(["brightnessctl", "-c", "backlight", "set", f"{max(1, min(100, int(args[0])))}%"])
+    return False, "Unsupported display action"
+
+
+def tailscale(action, args):
+    if os.geteuid() != 0:
+        return run(["pkexec", sys.executable, os.path.realpath(__file__), "tailscale", action] + args, timeout=120)
+    if action == "up":
+        return run(["tailscale", "up"], timeout=120)
+    if action == "down":
+        return run(["tailscale", "down"])
+    if action == "exit-node":
+        value = args[0] if args else ""
+        return run(["tailscale", "set", f"--exit-node={value}"])
+    return False, "Unsupported Tailscale action"
+
+
+def power(action, args):
+    if os.geteuid() != 0:
+        return run(["pkexec", sys.executable, os.path.realpath(__file__),
+                    "power", action] + args, timeout=120)
+    if action == "profile" and args:
+        return run(["powerprofilesctl", "set", args[0]])
+    return False, "Unsupported power action"
+
+
+HANDLERS = {"wifi": wifi, "bluetooth": bluetooth, "volume": audio,
+            "display": display, "tailscale": tailscale, "power": power}
+
+if len(sys.argv) < 3 or sys.argv[1] not in HANDLERS:
+    print(json.dumps({"ok": False, "detail": "Usage: nixos-control-action KIND ACTION [ARGS...]"}))
+    raise SystemExit(2)
+
+ok, detail = HANDLERS[sys.argv[1]](sys.argv[2], sys.argv[3:])
+print(json.dumps({"ok": ok, "detail": detail}))
+raise SystemExit(0 if ok else 1)

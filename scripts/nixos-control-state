@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""Read-only JSON state provider for the NixOS Control Center."""
+
+import json
+import re
+import shutil
+import subprocess
+import sys
+
+
+def run(args, timeout=5):
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
+    except (OSError, subprocess.SubprocessError) as error:
+        return 127, "", str(error)
+
+
+def split_nmcli(line):
+    fields, current, escaped = [], [], False
+    for char in line:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == ":":
+            fields.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    fields.append("".join(current))
+    return fields
+
+
+def wifi_state():
+    _, radio, _ = run(["nmcli", "-t", "-f", "WIFI", "general"])
+    _, device_rows, _ = run(["nmcli", "-t", "-e", "yes", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"])
+    devices = []
+    for line in device_rows.splitlines():
+        parts = split_nmcli(line)
+        if len(parts) >= 4 and parts[1] == "wifi":
+            devices.append({"name": parts[0], "state": parts[2], "connection": parts[3]})
+
+    _, known_rows, _ = run(["nmcli", "-t", "-e", "yes", "-f", "NAME,TYPE", "connection", "show"])
+    known = set()
+    for line in known_rows.splitlines():
+        parts = split_nmcli(line)
+        if len(parts) >= 2 and parts[-1] in ("802-11-wireless", "wifi"):
+            known.add(":".join(parts[:-1]))
+
+    _, network_rows, error = run([
+        "nmcli", "-t", "-e", "yes", "-f",
+        "IN-USE,SSID,BSSID,SIGNAL,SECURITY,FREQ", "device", "wifi", "list", "--rescan", "auto"
+    ], timeout=12)
+    by_ssid = {}
+    for line in network_rows.splitlines():
+        parts = split_nmcli(line)
+        if len(parts) < 6:
+            continue
+        active, ssid, bssid, signal, security, frequency = parts[:6]
+        if not ssid:
+            continue
+        try:
+            strength = int(signal)
+        except ValueError:
+            strength = 0
+        candidate = {
+            "ssid": ssid,
+            "bssid": bssid,
+            "signal": strength,
+            "security": security,
+            "frequency": frequency,
+            "active": active.strip() in ("*", "yes"),
+            "known": ssid in known,
+        }
+        previous = by_ssid.get(ssid)
+        if previous is None or candidate["active"] or strength > previous["signal"]:
+            by_ssid[ssid] = candidate
+
+    networks = sorted(by_ssid.values(), key=lambda row: (not row["active"], -row["signal"], row["ssid"].lower()))
+    return {
+        "kind": "wifi",
+        "available": bool(devices),
+        "enabled": radio.lower() == "enabled",
+        "devices": devices,
+        "networks": networks,
+        "error": error if not devices and error else "",
+    }
+
+
+def bluetooth_devices(filter_name=None):
+    args = ["bluetoothctl", "devices"] + ([filter_name] if filter_name else [])
+    _, output, _ = run(args)
+    rows = {}
+    for line in output.splitlines():
+        match = re.match(r"^Device\s+([0-9A-Fa-f:]+)\s+(.+)$", line.strip())
+        if match:
+            rows[match.group(1).upper()] = match.group(2).strip()
+    return rows
+
+
+def bluetooth_state():
+    _, show, error = run(["bluetoothctl", "show"])
+    if not show:
+        return {
+            "kind": "bluetooth", "available": False, "powered": False,
+            "discovering": False, "adapter": "", "devices": [],
+            "error": error or "No Bluetooth adapter",
+        }
+    powered = bool(re.search(r"^\s*Powered:\s+yes$", show, re.MULTILINE))
+    discovering = bool(re.search(r"^\s*Discovering:\s+yes$", show, re.MULTILINE))
+    adapter_match = re.search(r"^\s*Alias:\s+(.+)$", show, re.MULTILINE)
+    all_devices = bluetooth_devices()
+    connected = bluetooth_devices("Connected")
+    paired = bluetooth_devices("Paired")
+    rows = []
+    for address, name in all_devices.items():
+        rows.append({
+            "address": address,
+            "name": name,
+            "connected": address in connected,
+            "paired": address in paired,
+        })
+    rows.sort(key=lambda row: (not row["connected"], not row["paired"], row["name"].lower()))
+    return {
+        "kind": "bluetooth",
+        "available": bool(show),
+        "powered": powered,
+        "discovering": discovering,
+        "adapter": adapter_match.group(1).strip() if adapter_match else "",
+        "devices": rows,
+        "error": error if not show else "",
+    }
+
+
+def volume_state(target):
+    _, output, _ = run(["wpctl", "get-volume", target])
+    match = re.search(r"([0-9]+(?:\.[0-9]+)?)", output)
+    return {
+        "percent": round(float(match.group(1)) * 100) if match else 0,
+        "muted": "MUTED" in output.upper(),
+    }
+
+
+def parse_wpctl_status():
+    _, output, error = run(["wpctl", "status"])
+    section = ""
+    result = {"sinks": [], "sources": [], "streams": []}
+    for raw in output.splitlines():
+        stripped = raw.strip(" │├└─")
+        if stripped.startswith("Sinks:"):
+            section = "sinks"
+            continue
+        if stripped.startswith("Sources:"):
+            section = "sources"
+            continue
+        if stripped.startswith("Streams:"):
+            section = "streams"
+            continue
+        if stripped.endswith(":") and not re.match(r"^[* ]?\s*\d+\.", stripped):
+            if section == "streams" and stripped in ("Output:", "Input:"):
+                continue
+            section = ""
+            continue
+        if section not in result:
+            continue
+        match = re.match(r"^([* ])?\s*(\d+)\.\s+(.+)$", stripped)
+        if not match:
+            continue
+        name = re.sub(r"\s+\[(?:vol|active|paused):.*$", "", match.group(3)).strip()
+        result[section].append({
+            "id": int(match.group(2)),
+            "name": name,
+            "default": (match.group(1) or "").strip() == "*",
+        })
+    result["error"] = error if not output else ""
+    return result
+
+
+def audio_state():
+    state = {"kind": "volume", "output": volume_state("@DEFAULT_AUDIO_SINK@"),
+             "input": volume_state("@DEFAULT_AUDIO_SOURCE@")}
+    state.update(parse_wpctl_status())
+    for row in state.get("streams", []):
+        row.update(volume_state(str(row["id"])))
+    return state
+
+
+def display_state():
+    _, raw, error = run(["hyprctl", "monitors", "all", "-j"])
+    try:
+        monitors = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        monitors = []
+    _, brightness_raw, _ = run(["brightnessctl", "-c", "backlight", "-m"])
+    brightness_match = re.search(r",(\d+)%,", brightness_raw + ",")
+    return {
+        "kind": "display",
+        "brightnessAvailable": brightness_match is not None,
+        "brightness": int(brightness_match.group(1)) if brightness_match else 0,
+        "monitors": [{
+            "name": row.get("name", ""),
+            "description": row.get("description", ""),
+            "width": row.get("width", 0),
+            "height": row.get("height", 0),
+            "refreshRate": round(float(row.get("refreshRate", 0)), 1),
+            "x": row.get("x", 0),
+            "y": row.get("y", 0),
+            "scale": row.get("scale", 1),
+            "focused": row.get("focused", False),
+            "disabled": row.get("disabled", False),
+        } for row in monitors],
+        "error": error if not raw else "",
+    }
+
+
+def tailscale_state():
+    if not shutil.which("tailscale"):
+        return {"kind": "tailscale", "installed": False, "active": False, "peers": [], "error": "Tailscale is not installed"}
+    code, raw, error = run(["tailscale", "status", "--json"], timeout=8)
+    try:
+        data = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        data = {}
+    peers = []
+    for peer in (data.get("Peer") or {}).values():
+        peers.append({
+            "id": peer.get("ID", ""),
+            "host": peer.get("HostName") or peer.get("DNSName", "").rstrip("."),
+            "dns": peer.get("DNSName", "").rstrip("."),
+            "ips": peer.get("TailscaleIPs") or [],
+            "online": peer.get("Online", False),
+            "exitNode": peer.get("ExitNode", False),
+            "exitNodeOption": peer.get("ExitNodeOption", False),
+            "os": peer.get("OS", ""),
+        })
+    peers.sort(key=lambda row: (not row["online"], row["host"].lower()))
+    self_node = data.get("Self") or {}
+    backend = data.get("BackendState", "")
+    return {
+        "kind": "tailscale",
+        "installed": True,
+        "active": backend == "Running",
+        "needsLogin": backend in ("NeedsLogin", "NoState"),
+        "backend": backend,
+        "self": {"host": self_node.get("HostName", ""), "ips": self_node.get("TailscaleIPs") or []},
+        "peers": peers,
+        "error": error if code and not data else "",
+    }
+
+
+def power_state():
+    code, active, error = run(["powerprofilesctl", "get"])
+    _, available, _ = run(["powerprofilesctl", "list"])
+    profiles = re.findall(r"(?:^|\n)\s*\*?\s*([a-z][a-z-]+):", available)
+    return {"kind": "power", "available": code == 0, "active": active,
+            "profiles": profiles, "error": error if code else ""}
+
+
+READERS = {
+    "wifi": wifi_state,
+    "bluetooth": bluetooth_state,
+    "volume": audio_state,
+    "display": display_state,
+    "tailscale": tailscale_state,
+    "power": power_state,
+}
+
+
+kind = sys.argv[1] if len(sys.argv) > 1 else ""
+reader = READERS.get(kind)
+if not reader:
+    print(json.dumps({"kind": kind, "error": "Unknown control panel"}))
+    raise SystemExit(2)
+print(json.dumps(reader()))

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+calendar_config="$HOME/.config/quickshell/calendar.qml"
+
+if pgrep -f "^quickshell -n -p $calendar_config$" >/dev/null 2>&1; then
+  quickshell ipc --path "$calendar_config" call nixos-calendar toggle >/dev/null 2>&1 || true
+  exit 0
+fi
+
+NIXOS_CALENDAR_OPEN=1 exec quickshell -n -p "$calendar_config"

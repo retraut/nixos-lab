@@ -1,0 +1,13 @@
+[Unit]
+Description=One-time NixOS lab flake bootstrap
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=!/var/lib/nixos-lab-bootstrap.done
+
+[Service]
+Type=oneshot
+TimeoutStartSec=0
+ExecStart=/bin/sh -c 'user_home=$(getent passwd | awk -F: '\''$3 >= 1000 && $7 !~ /(nologin|false)$/ { print $6; exit }'\''); flake="$user_home/nixos-lab-config"; test -f "$flake/flake.nix" || exit 0; /run/current-system/sw/bin/nixos-rebuild switch --flake "$flake#nixos" --show-trace && touch /var/lib/nixos-lab-bootstrap.done'
+
+[Install]
+WantedBy=multi-user.target

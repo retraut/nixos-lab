@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+emoji_file="$HOME/.local/share/nixos-shell/emojis.txt"
+selection="$(fuzzel --dmenu --prompt='Emoji ❯  ' < "$emoji_file")" || exit 0
+[[ -n "$selection" ]] || exit 0
+
+emoji="${selection%% *}"
+printf '%s' "$emoji" | wl-copy
+notify-send -a nixos-action "Emoji copied" "$emoji"

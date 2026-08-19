@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+action="${1:-}"
+target="@DEFAULT_AUDIO_SINK@"
+kind="volume"
+
+case "$action" in
+  up)   wpctl set-volume -l 1.5 "$target" 5%+ ;;
+  down) wpctl set-volume "$target" 5%- ;;
+  mute) wpctl set-mute "$target" toggle ;;
+  mic)
+    target="@DEFAULT_AUDIO_SOURCE@"
+    kind="microphone"
+    wpctl set-mute "$target" toggle
+    ;;
+  *)
+    printf 'usage: %s {up|down|mute|mic}\n' "$0" >&2
+    exit 2
+    ;;
+esac
+
+quickshell ipc --path "$HOME/.config/quickshell/shell.qml" \
+  call nixos-osd "$kind" >/dev/null 2>&1 || true

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mode="${1:-toggle}"
+config_path="$HOME/.config/quickshell/control-center.qml"
+control_pid="$(pgrep -n -f "^quickshell -n -p $config_path$" || true)"
+
+if [[ -n "$control_pid" ]]; then
+  if [[ "$mode" == "open" ]]; then
+    exit 0
+  fi
+  timeout 2 quickshell ipc --pid "$control_pid" call nixos-control-center dismiss >/dev/null 2>&1 || true
+  exit 0
+fi
+
+if [[ "$mode" == "close" ]]; then
+  exit 0
+fi
+
+exec quickshell -n -p "$config_path"

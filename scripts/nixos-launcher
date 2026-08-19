@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+launcher="$HOME/.config/quickshell/app-launcher.qml"
+
+if pgrep -f "[q]uickshell -n -p $launcher" >/dev/null 2>&1; then
+  # If the menu is already open, still honor the Super+Space contract.
+  hyprctl switchxkblayout all 0 >/dev/null 2>&1 || true
+  exit 0
+fi
+
+previous_layout="$(hyprctl -j devices 2>/dev/null | jq -r '
+  [.keyboards[] | select(.main == true) | .active_layout_index][0] // 0
+' 2>/dev/null || printf '0')"
+if [[ ! "$previous_layout" =~ ^[0-9]+$ ]]; then
+  previous_layout=0
+fi
+
+restore_layout() {
+  hyprctl switchxkblayout all "$previous_layout" >/dev/null 2>&1 || true
+}
+trap restore_layout EXIT INT TERM
+
+# Keep the launcher itself in English, but restore the layout of the window
+# that invoked it after the overlay closes.
+hyprctl switchxkblayout all 0 >/dev/null 2>&1 || true
+quickshell -n -p "$launcher"

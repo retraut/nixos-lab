@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! brightnessctl -m >/dev/null 2>&1; then
+  exit 0
+fi
+
+case "${1:-}" in
+  up) brightnessctl set +5% >/dev/null ;;
+  down) brightnessctl set 5%- >/dev/null ;;
+  *)
+    printf 'usage: %s {up|down}\n' "$0" >&2
+    exit 2
+    ;;
+esac
+
+quickshell ipc --path "$HOME/.config/quickshell/shell.qml" \
+  call nixos-osd brightness >/dev/null 2>&1 || true

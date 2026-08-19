@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+background="$HOME/.local/share/nixos-theme/tokyo-night-quattro.jpg"
+
+exec swaybg -m fill -i "$background"
