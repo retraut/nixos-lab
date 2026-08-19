@@ -57,23 +57,12 @@ git clone https://github.com/retraut/nixos-lab.git
 cd nixos-lab
 ```
 
-5. Подивитися стабільні імена внутрішніх NVMe:
-
-```sh
-ls -l /dev/disk/by-id/nvme-*
-lsblk -o NAME,PATH,SIZE,MODEL,SERIAL,TRAN,RM,FSTYPE,MOUNTPOINTS
-```
-
-Не копіювати device name із цього документа. Live ISO може інакше назвати
-`/dev/nvme0n1`; аргументом має бути актуальний whole-disk symlink із
-`/dev/disk/by-id/`, без суфікса `-partN`.
-
 ## Один інсталяційний запуск
 
-Підставити **власний перевірений** by-id path:
+Запустити wrapper без disk argument:
 
 ```sh
-./scripts/install-laptop /dev/disk/by-id/nvme-EXACT_INTERNAL_DISK_ID
+./scripts/install-laptop
 ```
 
 Скрипт сам:
@@ -81,17 +70,22 @@ lsblk -o NAME,PATH,SIZE,MODEL,SERIAL,TRAN,RM,FSTYPE,MOUNTPOINTS
 1. Підніме права через графічний `pkexec`; якщо Polkit недоступний у live ISO,
    використає інтерактивний `sudo`.
 2. Відмовиться працювати не на ASUS GA503QS.
-3. Перевірить, що target — non-removable whole NVMe за by-id і що він не
-   змонтований.
-4. Покаже model, size, serial, transport і resolved device.
-5. Створить приватний installation snapshot конфігурації та додасть актуальний
+3. Знайде non-removable whole NVMe за `/dev/disk/by-id`, відкине partitions і
+   дублікати aliases. Продовжить лише якщо фізичний кандидат рівно один.
+4. Перевірить, що auto-detected target не змонтований.
+5. Покаже model, size, serial, transport, by-id і resolved device.
+6. Створить приватний installation snapshot конфігурації та додасть актуальний
    `hardware/laptop-configuration.nix`.
-6. Збере Disko й повний `.#laptop` у режимі `--dry-run`, не змінюючи диск.
-7. Попросить набрати точний довгий рядок `ERASE ...`.
-8. Приховано попросить login/sudo password для `retraut`.
-9. Приховано двічі попросить **окрему** LUKS passphrase.
-10. Зітре target, створить GPT + EFI + LUKS2 + Btrfs, встановить NixOS і
+7. Збере Disko й повний `.#laptop` у режимі `--dry-run`, не змінюючи диск.
+8. Попросить набрати точний довгий рядок `ERASE ...`.
+9. Приховано попросить login/sudo password для `retraut`.
+10. Приховано двічі попросить **окрему** LUKS passphrase.
+11. Зітре target, створить GPT + EFI + LUKS2 + Btrfs, встановить NixOS і
     збереже встановлений snapshot у `/etc/nixos`.
+
+Якщо внутрішніх NVMe два, скрипт покаже обидва й завершиться **до dry-run та
+wipe**. У такому випадку не треба імпровізувати: зберегти вивід і спроєктувати
+явний вибір окремо.
 
 Паролі не передаються в argv, Git або чат. Login password стає salted yescrypt
 hash у root-only `/etc/nixos-install-user-password-hash`; LUKS passphrase
@@ -174,7 +168,7 @@ terminal history, process arguments, логи або чат.
 
 ## Definition of done
 
-- [ ] Інсталяція відтворюється однією командою з перевіреним by-id target.
+- [ ] Інсталяція відтворюється однією командою з auto-detected single NVMe.
 - [ ] Root — LUKS2/Btrfs, перші boots стабільні з passphrase.
 - [ ] Login і `sudo` працюють із паролем; VM-only passwordless sudo відсутній.
 - [ ] `.#laptop` перебудовується без QEMU/autologin settings.

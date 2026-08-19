@@ -276,13 +276,14 @@ sudo nixos-rebuild switch --flake .#nixos
 sudo nixos-rebuild switch --flake .#laptop
 ```
 
-Чисте встановлення з офіційної NixOS live-флешки запускається одним wrapper-ом
-після ручної перевірки internal NVMe by-id:
+Чисте встановлення з офіційної NixOS live-флешки запускається одним wrapper-ом.
+Він сам знаходить єдиний non-removable whole NVMe й відмовляється вгадувати,
+якщо кандидатів немає або їх більше одного:
 
 ```sh
 git clone https://github.com/retraut/nixos-lab.git
 cd nixos-lab
-./scripts/install-laptop /dev/disk/by-id/nvme-EXACT_INTERNAL_DISK_ID
+./scripts/install-laptop
 ```
 
 Wrapper перевіряє GA503QS і target, генерує hardware layer без filesystems,
