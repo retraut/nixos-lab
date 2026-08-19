@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./scripts/install-laptop /dev/disk/by-id/<internal-nvme-id>
+
+This performs a FULL WIPE of one internal NVMe and installs the #laptop
+profile with GPT + EFI + LUKS2 + Btrfs. It only runs on an ASUS GA503QS and
+requires an exact /dev/disk/by-id path plus a typed destructive confirmation.
+EOF
+}
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+read_dmi() {
+  local value=
+  if [[ -r $1 ]]; then
+    IFS= read -r value <"$1" || true
+  fi
+  printf '%s' "$value"
+}
+
+if [[ ${1:-} == "--help" || ${1:-} == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+[[ $# -eq 1 ]] || {
+  usage >&2
+  exit 2
+}
+
+target=$1
+script_path=$(readlink -f -- "$0")
+repo_dir=$(cd -- "$(dirname -- "$script_path")/.." && pwd -P)
+
+# Prefer the graphical Polkit/fingerprint flow, with interactive sudo as the
+# live-ISO fallback. No password is ever accepted as a command argument.
+if (( EUID != 0 )); then
+  if command -v pkexec >/dev/null 2>&1 \
+    && [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]]; then
+    exec pkexec "$script_path" "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    exec sudo -- "$script_path" "$@"
+  else
+    die "root privileges are required, but neither pkexec nor sudo is available"
+  fi
+fi
+
+vendor=$(read_dmi /sys/class/dmi/id/sys_vendor)
+product=$(read_dmi /sys/class/dmi/id/product_name)
+board=$(read_dmi /sys/class/dmi/id/board_name)
+
+[[ $vendor == ASUSTeK* ]] || die "refusing non-ASUS host: ${vendor:-unknown vendor}"
+[[ "$product $board" == *GA503QS* ]] || {
+  die "refusing host that is not the inspected GA503QS: ${product:-unknown product} / ${board:-unknown board}"
+}
+
+for command in git head lsblk nix nixos-generate-config readlink tar; do
+  command -v "$command" >/dev/null 2>&1 || die "required command is missing: $command"
+done
+
+[[ $target == /dev/disk/by-id/* ]] || die "target must be an exact /dev/disk/by-id path"
+[[ $target != *-part[0-9]* ]] || die "target is a partition, not a whole disk: $target"
+[[ -L $target ]] || die "target is not a by-id symlink: $target"
+
+resolved=$(readlink -e -- "$target") || die "target does not resolve: $target"
+[[ -b $resolved ]] || die "resolved target is not a block device: $resolved"
+
+device_type=$(lsblk -dnro TYPE -- "$resolved" | tr -d '[:space:]')
+transport=$(lsblk -dnro TRAN -- "$resolved" | tr -d '[:space:]')
+removable=$(lsblk -dnro RM -- "$resolved" | tr -d '[:space:]')
+
+[[ $device_type == disk ]] || die "target is not a whole disk according to lsblk"
+[[ $transport == nvme ]] || die "target transport is '${transport:-unknown}', expected internal NVMe"
+[[ $removable == 0 ]] || die "target is marked removable; refusing to continue"
+
+if lsblk -nrpo MOUNTPOINTS -- "$resolved" | grep -q '[^[:space:]]'; then
+  lsblk -o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS -- "$resolved" >&2
+  die "the target or one of its descendants is mounted/in use"
+fi
+
+printf '\nValidated laptop and destructive target:\n'
+printf '  Host:   %s / %s\n' "$product" "$board"
+lsblk -dn -o PATH,SIZE,MODEL,SERIAL,TRAN,RM -- "$resolved"
+printf '  By ID:  %s -> %s\n\n' "$target" "$resolved"
+
+work_dir=$(mktemp -d /run/nixos-install.XXXXXX)
+cleanup() {
+  case ${work_dir:-} in
+    /run/nixos-install.*) rm -rf -- "$work_dir" ;;
+  esac
+}
+trap cleanup EXIT INT TERM
+umask 077
+
+config_dir=$work_dir/config
+mkdir -p -- "$config_dir"
+git -C "$repo_dir" archive --format=tar HEAD | tar -xf - -C "$config_dir"
+chmod 0755 "$config_dir"
+
+# Disko declares every filesystem. The machine scan is still useful for
+# initrd/kernel modules and platform quirks, but must not duplicate mounts.
+nixos-generate-config --show-hardware-config --no-filesystems \
+  >"$config_dir/hardware/laptop-configuration.nix"
+chmod 0644 "$config_dir/hardware/laptop-configuration.nix"
+
+if grep -Eq 'fileSystems\.|swapDevices' "$config_dir/hardware/laptop-configuration.nix"; then
+  die "generated hardware scan unexpectedly contains filesystem declarations"
+fi
+
+config_flake="path:$config_dir"
+install_flake="$config_flake#laptop"
+
+printf 'Building a pinned dry-run first; no disk commands execute in this step.\n\n'
+nix run "$config_flake#disko-install" -- \
+  --dry-run \
+  --write-efi-boot-entries \
+  --flake "$install_flake" \
+  --disk main "$target" \
+  --mount-point "$work_dir/dry-run-mount"
+
+confirmation="ERASE $(basename -- "$target")"
+printf '\nThis is the final gate. Everything on %s will be destroyed.\n' "$target"
+printf 'Type exactly: %s\n> ' "$confirmation"
+IFS= read -r typed_confirmation
+[[ $typed_confirmation == "$confirmation" ]] || die "confirmation did not match; nothing was erased"
+
+hash_file=$work_dir/user-password-hash
+printf '\nChoose the login/sudo password for user retraut. Input is hidden.\n'
+nix run "$config_flake#mkpasswd" -- -m yescrypt >"$hash_file"
+chmod 0600 "$hash_file"
+hash_prefix=$(head -c 3 "$hash_file")
+expected_hash_prefix=$(printf '\044y\044')
+[[ $hash_prefix == "$expected_hash_prefix" ]] || die "mkpasswd did not produce a valid yescrypt hash"
+
+printf '\nDisko will now ask twice for a separate LUKS passphrase.\n'
+printf 'Keep that passphrase safe: TPM enrollment happens only after stable first boots.\n\n'
+
+nix run "$config_flake#disko-install" -- \
+  --write-efi-boot-entries \
+  --flake "$install_flake" \
+  --disk main "$target" \
+  --extra-files "$config_dir" /etc/nixos \
+  --extra-files "$hash_file" /etc/nixos-install-user-password-hash
+
+printf '\nInstall complete. Shut down, remove the USB, then boot the internal disk.\n'
+printf 'The installed configuration snapshot is in /etc/nixos.\n'

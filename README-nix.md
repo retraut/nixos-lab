@@ -10,11 +10,12 @@ NixOS-native, декларативним і не залежить від Arch/Om
 `26.11.20260816.e5bdc4a`; на момент останнього аудиту system і user systemd мали
 по `0` failed units.
 
-Покроковий checklist для чистого встановлення на фізичний ASUS ROG Zephyrus
-G15 GA503QS, включно з LUKS2, Secure Boot, TPM2 + PIN і recovery, знаходиться в
+Автоматизований checklist для чистого встановлення на фізичний ASUS ROG
+Zephyrus G15 GA503QS, включно з Disko, LUKS2, Secure Boot, TPM2 + PIN і
+recovery, знаходиться в
 [`LAPTOP-INSTALL-RUNBOOK.md`](./LAPTOP-INSTALL-RUNBOOK.md).
 
-## Стан на 2026-08-18
+## Стан на 2026-08-19
 
 ### Базова система
 
@@ -257,9 +258,13 @@ Control Center має IPC target `nixos-control-center` з методами `pan
 Спільний desktop описаний у `configuration.nix`, `desktop.nix`, `theme.nix` і Quickshell-файлах. Апаратні та небезпечні для реального ноутбука налаштування винесені в host-модулі:
 
 - `hosts/vm.nix` — QEMU guest agent, VM hardware scan, autologin і passwordless sudo для disposable VM.
-- `hosts/laptop.nix` — laptop hostname, без QEMU/autologin і з Bluetooth.
+- `hosts/laptop.nix` — laptop hostname, login password hash path, GA503QS PRIME
+  override і жодних QEMU/autologin/passwordless-sudo settings.
+- `hosts/laptop-disko.nix` — GPT + 2 GiB EFI + LUKS2 + Btrfs layout для full wipe.
 - `hardware-configuration.nix` — поточний згенерований конфіг VM.
-- `hardware/laptop-configuration.nix` — optional-файл, який flake автоматично підхопить, якщо він існує.
+- `hardware/laptop-configuration.nix` — безпечний placeholder; installer замінює
+  його актуальним hardware scan у приватному installation snapshot.
+- upstream module `asus-zephyrus-ga503` — AMD/NVIDIA та інші model-specific quirks.
 
 Профілі:
 
@@ -271,15 +276,19 @@ sudo nixos-rebuild switch --flake .#nixos
 sudo nixos-rebuild switch --flake .#laptop
 ```
 
-На ноутбуці після клонування репозиторію треба згенерувати його власний hardware layer:
+Чисте встановлення з офіційної NixOS live-флешки запускається одним wrapper-ом
+після ручної перевірки internal NVMe by-id:
 
 ```sh
-sudo nixos-generate-config --show-hardware-config \
-  > hardware/laptop-configuration.nix
-sudo nixos-rebuild switch --flake .#laptop
+git clone https://github.com/retraut/nixos-lab.git
+cd nixos-lab
+./scripts/install-laptop /dev/disk/by-id/nvme-EXACT_INTERNAL_DISK_ID
 ```
 
-До появи цього файлу `hosts/laptop.nix` використовує лише evaluation defaults для root/EFI; це не bootable hardware config. Після генерації нормальні значення з `hardware/laptop-configuration.nix` перекриють defaults. Файл має бути host-specific і не повинен замінювати VM-ий `hardware-configuration.nix`.
+Wrapper перевіряє GA503QS і target, генерує hardware layer без filesystems,
+робить pinned Disko dry-run, просить точне destructive-підтвердження, окремі
+login та LUKS passwords, а потім встановлює `.#laptop`. Деталі й stop gates є
+в runbook; цей workflow призначений лише для повного стирання диска.
 
 ## Apple Silicon / nix-darwin skeleton
 
@@ -300,6 +309,9 @@ sudo nix run nix-darwin/master#darwin-rebuild -- \
 
 ## Наступні кроки
 
-- На ноутбуці додати `hardware/laptop-configuration.nix` через `nixos-generate-config` і перевірити `.#laptop`.
+- Виконати installation runbook на ноутбуці й перевірити hardware-specific
+  Wi-Fi, audio, suspend, AMD/NVIDIA PRIME та thermals.
+- Після кількох стабільних LUKS-passphrase boots окремо додати Lanzaboote,
+  recovery material і TPM2 + PIN.
 - За потреби додати окреме джерело power для RAPL/hwmon на фізичному ноутбуці.
 - Продовжити наближення Control Center, weather і tray до оригінального Omarchy без імпорту Arch/Omarchy update-механізмів або runtime theme picker-а.
