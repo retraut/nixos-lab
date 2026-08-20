@@ -191,9 +191,11 @@ let
     slack
     bitwarden-desktop
     curl
+    lsof
     gitMinimal
     eza
     gnome-calendar
+    gnome-control-center
     gnome-online-accounts
     voxtype-vulkan
     screenfetch
