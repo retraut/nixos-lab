@@ -11,7 +11,8 @@ NixOS-native, декларативним і не залежить від Arch/Om
 по `0` failed units.
 
 Автоматизований checklist для чистого встановлення на фізичний ASUS ROG
-Zephyrus G15 GA503QS, включно з Disko, LUKS2, Secure Boot, TPM2 + PIN і
+Zephyrus G15 GA503QS, включно з Disko, LUKS2, Secure Boot і TPM2 auto-unlock з
+login password після розшифрування,
 recovery, знаходиться в
 [`LAPTOP-INSTALL-RUNBOOK.md`](./LAPTOP-INSTALL-RUNBOOK.md).
 
@@ -313,6 +314,6 @@ sudo nix run nix-darwin/master#darwin-rebuild -- \
 - Виконати installation runbook на ноутбуці й перевірити hardware-specific
   Wi-Fi, audio, suspend, AMD/NVIDIA PRIME та thermals.
 - Після кількох стабільних LUKS-passphrase boots окремо додати Lanzaboote,
-  recovery material і TPM2 + PIN.
+  recovery material і TPM2 auto-unlock.
 - За потреби додати окреме джерело power для RAPL/hwmon на фізичному ноутбуці.
 - Продовжити наближення Control Center, weather і tray до оригінального Omarchy без імпорту Arch/Omarchy update-механізмів або runtime theme picker-а.

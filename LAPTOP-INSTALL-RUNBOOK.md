@@ -19,7 +19,7 @@
 - dry-run і кілька fail-closed перевірок перед destructive-кроком.
 
 Інсталяція не додає TPM unlock одразу. Спочатку диск відкривається окремою
-довгою LUKS passphrase. Secure Boot, recovery material і TPM2 + PIN — наступні
+довгою LUKS passphrase. Secure Boot, recovery material і TPM2 auto-unlock — наступні
 етапи після кількох стабільних boots.
 
 ## Stop gates перед стиранням
@@ -150,27 +150,26 @@ UUID і hardware module list не є паролями, але перед commit 
 Recovery key і header backup є секретами. Не вставляти їх у flake, Git,
 terminal history, process arguments, логи або чат.
 
-## TPM2 + PIN — після recovery і Secure Boot
+## TPM2 auto-unlock — після recovery і Secure Boot
 
 Після стабільного Secure Boot:
 
 - [ ] Увімкнути systemd initrd і TPM2 support у NixOS.
 - [ ] Вибрати PCR/signed-policy strategy для фактичного boot chain, а не
       копіювати випадковий PCR list.
-- [ ] Додати TPM2 + PIN token у LUKS2 header:
+- [ ] Додати TPM2 token у LUKS2 header:
 
 ```sh
 sudo systemd-cryptenroll \
   --tpm2-device=auto \
-  --tpm2-with-pin=yes \
   /dev/disk/by-label/NIXOS_CRYPT
 ```
 
-  Команда попросить поточну LUKS passphrase і новий TPM PIN. Якщо обрана
+  Команда попросить поточну LUKS passphrase, але не TPM PIN. Якщо обрана
   PCR-bound policy, додати до неї лише перевірені PCR options для фактичного
-  Secure Boot chain. Не передавати passphrase або PIN в аргументах shell.
+  Secure Boot chain. Не передавати passphrase в аргументах shell.
 - [ ] Не видаляти LUKS passphrase.
-- [ ] Перевірити TPM + PIN, fallback passphrase і recovery key.
+- [ ] Перевірити TPM auto-unlock, fallback passphrase і recovery key.
 - [ ] Перевірити boot після звичайного NixOS rebuild і firmware update plan.
 
 Після BIOS settings change, BIOS update, Secure Boot key change, TPM clear або
@@ -185,5 +184,5 @@ sudo systemd-cryptenroll \
 - [ ] `.#laptop` перебудовується без QEMU/autologin settings.
 - [ ] Працюють Wi-Fi, Bluetooth, audio, suspend, AMD і NVIDIA offload.
 - [ ] Немає failed system/user units і Hyprland config errors.
-- [ ] Пізніше ввімкнено перевірений Secure Boot і TPM2 + PIN.
+- [ ] Пізніше ввімкнено перевірений Secure Boot і TPM2 auto-unlock.
 - [ ] Passphrase, recovery key і header backup перевірені як fallback.
