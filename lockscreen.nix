@@ -78,8 +78,8 @@ in
         check_color = rgb(${rawColors.base0B})
         success_color = rgb(${rawColors.base0B})
         fail_color = rgb(${rawColors.base08})
-        success_text =
-        fail_text =
+        success_text = Success
+        fail_text = Failed
         capslock_color = rgb(${rawColors.base09})
         position = 0, 0
         halign = center

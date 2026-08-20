@@ -507,7 +507,8 @@ index bd25f9c..b042224 100644
 +    else if (SHOWFAILURE && passwordLength == 0)
          targetGrad = colorConfig.fail;
 
-     CGradientValueData* outerTarget = colorConfig.outer;
+-    CGradientValueData* outerTarget = colorConfig.outer;
++    CGradientValueData* outerTarget = displaySuccess ? colorConfig.success : (SHOWFAILURE ? colorConfig.fail : colorConfig.outer);
      CHyprColor          innerTarget = colorConfig.inner;
      CHyprColor          fontTarget  = colorConfig.font;
 
