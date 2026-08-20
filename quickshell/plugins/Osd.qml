@@ -12,6 +12,22 @@ Item {
   property string queryKind: "volume"
   property int value: 0
   property string message: ""
+  property string voxtypeState: "idle"
+  property real voxtypePeak: 0.0
+
+  readonly property bool voxtypeActive: voxtypeState !== "idle" && voxtypeState !== ""
+  readonly property bool voxtypeRecording: voxtypeState === "recording"
+  readonly property bool voxtypeTranscribing: voxtypeState === "transcribing"
+  readonly property color voxtypeColor: voxtypeRecording
+    ? (theme ? theme.urgent : "#f7768e")
+    : (theme ? theme.accent : "#7aa2f7")
+  readonly property string voxtypeLabel: voxtypeRecording
+    ? "RECORDING"
+    : (voxtypeTranscribing ? "TRANSCRIBING" : String(voxtypeState).toUpperCase())
+  readonly property string voxtypeStatePath: {
+    var xdg = Quickshell.env("XDG_RUNTIME_DIR")
+    return xdg && xdg.length > 0 ? xdg + "/voxtype/state" : "/run/user/1000/voxtype/state"
+  }
 
   readonly property string icon: {
     if (kind === "volume-muted") return ""
@@ -52,10 +68,60 @@ Item {
     root.show(shownKind, percent, percent + "%")
   }
 
+  function setVoxtypeState(raw) {
+    var next = String(raw || "idle").trim().split(/\s+/)[0] || "idle"
+    if (next !== root.voxtypeState) root.voxtypeState = next
+  }
+
+  function handleVoxtypeAudio(raw) {
+    try {
+      var frame = JSON.parse(String(raw || "").trim())
+      if (typeof frame.peak === "number")
+        root.voxtypePeak = Math.max(0.0, Math.min(1.0, frame.peak))
+    } catch (error) {
+      // Ignore the bridge's connected/disconnected status lines.
+    }
+  }
+
   Process {
     id: statusProcess
     stdout: StdioCollector { id: statusOutput }
     onExited: root.applyStatus(statusOutput.text)
+  }
+
+  FileView {
+    path: root.voxtypeStatePath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.setVoxtypeState(text())
+    onLoadFailed: root.setVoxtypeState("idle")
+    onFileChanged: reload()
+  }
+
+  Process {
+    id: voxtypeAudioBridge
+    command: ["voxtype-audio-bridge"]
+    running: root.voxtypeRecording
+
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(data) { root.handleVoxtypeAudio(data) }
+    }
+
+    onRunningChanged: {
+      if (!running) root.voxtypePeak = 0.0
+    }
+  }
+
+  onVoxtypeStateChanged: {
+    if (!root.voxtypeRecording) root.voxtypePeak = 0.0
+  }
+
+  Timer {
+    interval: 160
+    repeat: true
+    running: root.voxtypeRecording && root.voxtypePeak < 0.01
+    onTriggered: root.voxtypePeak = 0.12
   }
 
   Timer {
@@ -86,6 +152,7 @@ Item {
   }
 
   PanelWindow {
+    id: volumePanel
     visible: root.opened
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
@@ -147,6 +214,93 @@ Item {
           font.pixelSize: 18
           font.bold: true
           horizontalAlignment: Text.AlignRight
+        }
+      }
+    }
+  }
+
+  PanelWindow {
+    id: voxtypePanel
+    visible: root.voxtypeActive
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "nixos-voxtype-osd"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+    mask: Region {
+      intersection: Intersection.Subtract
+      x: 0
+      y: 0
+      width: voxtypePanel.width
+      height: voxtypePanel.height
+    }
+
+    Rectangle {
+      width: 430
+      height: 82
+      anchors.horizontalCenter: parent.horizontalCenter
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: 72
+      color: root.theme
+        ? Qt.rgba(root.theme.background.r, root.theme.background.g, root.theme.background.b, 0.97)
+        : "#101315"
+      border.width: 2
+      border.color: root.voxtypeColor
+      radius: 0
+
+      Row {
+        anchors.fill: parent
+        anchors.leftMargin: 18
+        anchors.rightMargin: 18
+        spacing: 14
+
+        Text {
+          width: 42
+          anchors.verticalCenter: parent.verticalCenter
+          text: root.voxtypeRecording ? "󰍬" : "󰔟"
+          color: root.voxtypeColor
+          font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
+          font.pixelSize: 32
+          horizontalAlignment: Text.AlignHCenter
+        }
+
+        Column {
+          anchors.verticalCenter: parent.verticalCenter
+          width: parent.width - 56
+          spacing: 6
+
+          Text {
+            text: "MIC  ·  " + root.voxtypeLabel
+            color: root.theme ? root.theme.foreground : "#c0caf5"
+            font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
+            font.pixelSize: 13
+            font.bold: true
+          }
+
+          Row {
+            height: 25
+            spacing: 3
+
+            Repeater {
+              model: 18
+
+              Rectangle {
+                width: 5
+                height: root.voxtypeRecording
+                  ? Math.max(6, Math.min(25, 6 + root.voxtypePeak * 19 + ((index * 5) % 4)))
+                  : 6
+                anchors.verticalCenter: parent.verticalCenter
+                color: root.voxtypeColor
+                opacity: root.voxtypeRecording ? 1.0 : 0.65
+
+                Behavior on height {
+                  NumberAnimation { duration: 100; easing.type: Easing.OutCubic }
+                }
+              }
+            }
+          }
         }
       }
     }

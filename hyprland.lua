@@ -103,6 +103,8 @@ hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-bright
 hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-brightness down"), { description = "Brightness down", locked = true, repeating = true })
 hl.bind("XF86KbdBrightnessUp", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-kbd-brightness up"), { description = "Keyboard brightness up", locked = true, repeating = true })
 hl.bind("XF86KbdBrightnessDown", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-kbd-brightness down"), { description = "Keyboard brightness down", locked = true, repeating = true })
+-- ASUS ROG key: wev reports XF86Launch1 / physical keycode 156.
+hl.bind("code:156", hl.dsp.exec_cmd("voxtype record toggle"), { description = "Toggle Voxtype transcription" })
 hl.bind(mod .. " + W", hl.dsp.window.close(), { description = "Close window" })
 hl.bind(mod .. " + F", hl.dsp.window.fullscreen(0), { description = "Fullscreen" })
 hl.bind(mod .. " + T", hl.dsp.window.float({ action = "toggle" }), { description = "Toggle floating" })
@@ -254,13 +256,7 @@ hl.bind(mod .. " + C", function()
   end
 end, { description = "Universal copy" })
 
-hl.bind(mod .. " + V", function()
-  if activeWindowIsTerminal() then
-    sendShortcutOnce("SHIFT", "Insert")()
-  else
-    sendShortcutOnce("CTRL", "code:55")()
-  end
-end, { description = "Universal paste" })
+hl.bind(mod .. " + V", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-universal-paste"), { description = "Universal paste" })
 
 hl.bind(mod .. " + code:38", function()
   if activeWindowIsTerminal() then
@@ -278,6 +274,6 @@ for i = 1, 10 do
 end
 
 hl.on("hyprland.start", function()
-  hl.exec_cmd("systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE")
+  hl.exec_cmd("systemctl --user import-environment WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP XDG_SESSION_TYPE")
   hl.exec_cmd("dbus-update-activation-environment --systemd --all")
 end)

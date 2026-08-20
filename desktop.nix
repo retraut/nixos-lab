@@ -78,6 +78,39 @@ let
     '';
   };
 
+  universalPasteHelper = pkgs.writeShellScriptBin "nixos-universal-paste" ''
+    set -euo pipefail
+
+    # App-aware paste for the physical Super+V binding.
+    window_class="$(${lib.getExe' pkgs.hyprland "hyprctl"} activewindow -j 2>/dev/null \
+      | ${lib.getExe pkgs.jq} -r '[(.class // ""), (.initialClass // "")] | join(" ")' \
+      | ${lib.getExe' pkgs.coreutils "tr"} '[:upper:]' '[:lower:]')"
+
+    send_shortcut() {
+      mods="$1"
+      key="$2"
+
+      # Match Hyprland's layout-independent Super+V implementation exactly:
+      # send a physical key down/up pair instead of a layout-dependent keysym.
+      ${lib.getExe' pkgs.hyprland "hyprctl"} eval \
+        "hl.dispatch(hl.dsp.send_key_state({ mods = \"$mods\", key = \"$key\", state = \"down\" }))" \
+        >/dev/null
+      ${lib.getExe' pkgs.coreutils "sleep"} 0.05
+      ${lib.getExe' pkgs.hyprland "hyprctl"} eval \
+        "hl.dispatch(hl.dsp.send_key_state({ mods = \"$mods\", key = \"$key\", state = \"up\" }))" \
+        >/dev/null
+    }
+
+    case "$window_class" in
+      *ghostty*|*foot*|*alacritty*|*kitty*|*wezterm*|*terminal*)
+        send_shortcut "SHIFT" "Insert"
+        ;;
+      *)
+        send_shortcut "CTRL" "code:55"
+        ;;
+    esac
+  '';
+
   chromiumScaled = pkgs.symlinkJoin {
     name = "chromium-scaled";
     paths = [ pkgs.chromium ];
@@ -162,6 +195,7 @@ let
     eza
     gnome-calendar
     gnome-online-accounts
+    voxtype-vulkan
     screenfetch
     hyprsunset
     wlsunset
@@ -172,6 +206,7 @@ let
     python3
     libnotify
     wl-clipboard
+    wtype
     cliphist
     fuzzel
     brightnessctl
@@ -302,6 +337,12 @@ in
           # Super+W closes the active Ghostty surface through Hyprland. Keep
           # that action immediate; Chromium gets its own Ctrl+W tab binding.
           "confirm-close-surface" = false;
+
+          # VoxType and the universal paste helper deliberately use the
+          # layout-independent Shift+Insert chord. Ghostty maps that chord to
+          # PRIMARY selection by default, so point it at the regular clipboard
+          # instead; otherwise selected text can replace the transcription.
+          keybind = "shift+insert=paste_from_clipboard";
         };
       };
 
@@ -313,6 +354,67 @@ in
         GDK_BACKEND = "wayland,x11,*";
         MOZ_ENABLE_WAYLAND = "1";
         NIXOS_OZONE_WL = "1";
+      };
+
+      services.voxtype = {
+        enable = true;
+        package = pkgs.voxtype-vulkan;
+        loadModels = [ "large-v3-turbo" ];
+        environment = {
+          # The daemon launches voxtype-osd by name. Keep the Voxtype package
+          # on PATH so the OSD frontend is discoverable from systemd too.
+          PATH = lib.makeBinPath [
+            pkgs.voxtype-vulkan
+            # Voxtype runs post-process and output hooks through `sh -c`.
+            # NixOS has no global /bin/sh, so keep a shell on the service PATH.
+            pkgs.bash
+            pkgs.coreutils
+            pkgs.which
+            pkgs.wl-clipboard
+            pkgs.wtype
+            pkgs.jq
+            pkgs.hyprland
+          ];
+          VOXTYPE_VULKAN_DEVICE = "amd";
+          # The user service can start before Hyprland imports its session
+          # environment. Give wtype the active Wayland socket explicitly.
+          WAYLAND_DISPLAY = "wayland-1";
+          DISPLAY = ":0";
+          XDG_CURRENT_DESKTOP = "Hyprland";
+          XDG_SESSION_TYPE = "wayland";
+        };
+        settings = {
+          hotkey.enabled = false;
+          whisper = {
+            model = "large-v3-turbo";
+            language = [ "uk" "en" ];
+            translate = false;
+          };
+          output = {
+            # Copy one normalized line and paste it as a single bracketed-paste
+            # operation. Ghostty remaps this layout-independent shortcut to the
+            # regular clipboard, so PRIMARY selection can never be pasted here.
+            mode = "paste";
+            paste_keys = "shift+insert";
+            pre_type_delay_ms = 200;
+            post_process = {
+              command = "${pkgs.coreutils}/bin/tr '\\r\\n' '  '";
+              timeout_ms = 5000;
+            };
+            auto_submit = false;
+            notification = {
+              on_recording_start = false;
+              on_recording_stop = false;
+              on_transcription = false;
+            };
+          };
+          osd = {
+            # The nixpkgs Voxtype package ships the launcher but not the
+            # GTK4/Quickshell frontend binaries. Our Quickshell shell hosts
+            # the state/audio HUD instead.
+            enabled = false;
+          };
+        };
       };
 
       home.file = {
@@ -475,6 +577,10 @@ in
         };
         ".local/bin/nixos-clipboard" = {
           source = ./scripts/nixos-clipboard;
+          executable = true;
+        };
+        ".local/bin/nixos-universal-paste" = {
+          source = "${universalPasteHelper}/bin/nixos-universal-paste";
           executable = true;
         };
         ".local/bin/nixos-emoji" = {
