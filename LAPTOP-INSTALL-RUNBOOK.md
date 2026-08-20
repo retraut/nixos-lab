@@ -157,7 +157,18 @@ terminal history, process arguments, логи або чат.
 - [ ] Увімкнути systemd initrd і TPM2 support у NixOS.
 - [ ] Вибрати PCR/signed-policy strategy для фактичного boot chain, а не
       копіювати випадковий PCR list.
-- [ ] Enroll-нути TPM2 з PIN через `systemd-cryptenroll`.
+- [ ] Додати TPM2 + PIN token у LUKS2 header:
+
+```sh
+sudo systemd-cryptenroll \
+  --tpm2-device=auto \
+  --tpm2-with-pin=yes \
+  /dev/disk/by-label/NIXOS_CRYPT
+```
+
+  Команда попросить поточну LUKS passphrase і новий TPM PIN. Якщо обрана
+  PCR-bound policy, додати до неї лише перевірені PCR options для фактичного
+  Secure Boot chain. Не передавати passphrase або PIN в аргументах shell.
 - [ ] Не видаляти LUKS passphrase.
 - [ ] Перевірити TPM + PIN, fallback passphrase і recovery key.
 - [ ] Перевірити boot після звичайного NixOS rebuild і firmware update plan.
