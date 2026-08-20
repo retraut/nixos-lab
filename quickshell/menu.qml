@@ -11,14 +11,21 @@ ShellRoot {
 
   Theme { id: theme }
 
+  readonly property int titleFontSize: 16
+  readonly property int detailFontSize: 12
+
   readonly property var items: [
+    { title: "Rebuild NixOS", detail: "Apply config without restarting the GUI", icon: "󰚰", command: ["ghostty", "--title=NixOS Rebuild", "-e", "nixos-rebuild"] },
+    // This is intentionally separate from the rebuild action, but calls the
+    // shell's in-process reload so other GUI applications stay untouched.
+    { title: "Restart shell", detail: "Reload only Quickshell; keep apps open", icon: "󰑐", command: ["quickshell", "ipc", "--path", Quickshell.env("HOME") + "/.config/quickshell/shell.qml", "call", "nixos-shell", "reload"] },
     { title: "Clipboard history", detail: "Super + Shift + V", icon: "󰅍", command: ["nixos-clipboard"] },
     { title: "Emoji picker", detail: "Super + Ctrl + Space", icon: "󰞅", command: ["nixos-emoji"] },
     { title: "Screenshot region", detail: "Print", icon: "󰹑", command: ["nixos-capture", "region"] },
     { title: "Screenshot window", detail: "Super + Print", icon: "󱣴", command: ["nixos-capture", "window"] },
     { title: "Screenshot fullscreen", detail: "Shift + Print", icon: "󰍹", command: ["nixos-capture", "fullscreen"] },
     { title: "Notifications", detail: "Super + N", icon: "󰂚", command: ["quickshell", "ipc", "--path", Quickshell.env("HOME") + "/.config/quickshell/shell.qml", "call", "nixos-notifications", "toggleCenter"] },
-    { title: "Lock session", detail: "Super + Escape", icon: "󰌾", command: ["nixos-lock"] }
+    { title: "Lock session", detail: "Super + L", icon: "󰌾", command: ["nixos-lock"] }
   ]
 
   function close() { Qt.quit() }
@@ -41,10 +48,10 @@ ShellRoot {
 
     Rectangle {
       id: card
-      implicitWidth: content.implicitWidth + 32
-      implicitHeight: content.implicitHeight + 32
-      width: Math.min(Math.max(520, implicitWidth), 1200)
-      height: Math.min(Math.max(186, implicitHeight), 900)
+      implicitWidth: content.implicitWidth + theme.popupPadding * 2
+      implicitHeight: content.implicitHeight + theme.popupPadding * 2
+      width: Math.min(theme.popupWidth, panel.width - 48)
+      height: Math.max(186, Math.min(implicitHeight, panel.height - 48))
       anchors.centerIn: parent
       radius: 0
       color: theme.background
@@ -61,12 +68,12 @@ ShellRoot {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.margins: 16
+        anchors.margins: theme.popupPadding
         spacing: 8
 
         RowLayout {
           Layout.fillWidth: true
-          Text { text: "Menu"; color: theme.foreground; font.pixelSize: theme.widgetFontSize; font.weight: Font.Medium }
+          Text { text: "Menu"; color: theme.foreground; font.pixelSize: root.titleFontSize; font.weight: Font.Medium }
           Item { Layout.fillWidth: true }
         }
 
@@ -74,27 +81,43 @@ ShellRoot {
           model: root.items
           delegate: Rectangle {
             required property var modelData
+            readonly property bool danger: modelData.danger === true
             Layout.fillWidth: true
-            implicitHeight: Math.max(50, menuInfo.implicitHeight + 24)
+            implicitHeight: Math.max(44, menuInfo.implicitHeight + 14)
             radius: 0
-            color: rowMouse.containsMouse ? theme.selected : theme.panel
+            color: danger
+              ? (rowMouse.containsMouse
+                ? Qt.rgba(theme.urgent.r, theme.urgent.g, theme.urgent.b, 0.18)
+                : Qt.rgba(theme.urgent.r, theme.urgent.g, theme.urgent.b, 0.07))
+              : (rowMouse.containsMouse ? theme.selected : theme.panel)
             border.width: 1
-            border.color: theme.border
+            border.color: danger
+              ? Qt.rgba(theme.urgent.r, theme.urgent.g, theme.urgent.b, 0.72)
+              : theme.border
+
+            Rectangle {
+              visible: danger
+              width: 3
+              anchors.top: parent.top
+              anchors.bottom: parent.bottom
+              anchors.left: parent.left
+              color: theme.urgent
+            }
 
             RowLayout {
               anchors.fill: parent
               anchors.leftMargin: 12
               anchors.rightMargin: 12
               spacing: 10
-              Text { text: modelData.icon; color: theme.accent; font.pixelSize: 18 }
+              Text { text: modelData.icon; color: danger ? theme.urgent : theme.accent; font.pixelSize: 17 }
               Column {
                 id: menuInfo
                 Layout.fillWidth: true
                 spacing: 2
-              Text { text: modelData.title; color: theme.foreground; font.pixelSize: theme.widgetFontSize }
-                Text { text: modelData.detail; color: theme.muted; font.pixelSize: theme.widgetFontSize; elide: Text.ElideRight; width: parent.width }
+                Text { text: modelData.title; color: danger ? theme.urgent : theme.foreground; font.pixelSize: root.titleFontSize }
+                Text { text: modelData.detail; color: theme.muted; font.pixelSize: root.detailFontSize; elide: Text.ElideRight; width: parent.width }
               }
-              Text { text: "→"; color: theme.muted; font.pixelSize: theme.widgetFontSize }
+              Text { text: danger ? "!" : "→"; color: danger ? theme.urgent : theme.muted; font.pixelSize: root.titleFontSize; font.weight: danger ? Font.Bold : Font.Normal }
             }
 
             MouseArea {

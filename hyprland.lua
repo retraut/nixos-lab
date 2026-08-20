@@ -39,8 +39,21 @@ hl.config({
       scroll_factor = 0.4,
     },
   },
-  misc = { disable_hyprland_logo = true, disable_splash_rendering = true },
+  misc = {
+    disable_hyprland_logo = true,
+    disable_splash_rendering = true,
+    -- Omarchy behavior: allow Alt+Tab to focus another tiled window without
+    -- forcing the current fullscreen client back into the tiled layout.
+    on_focus_under_fullscreen = 1,
+  },
   xwayland = { force_zero_scaling = true },
+})
+
+-- Switch between adjacent workspaces with a three-finger horizontal swipe.
+hl.gesture({
+  fingers = 3,
+  direction = "horizontal",
+  action = "workspace",
 })
 
 hl.monitor({ output = "Virtual-1", mode = "1920x1080@60", position = "0x0", scale = 1 })
@@ -55,16 +68,16 @@ hl.env("MOZ_ENABLE_WAYLAND", "1")
 hl.curve("easeOutQuint", { type = "bezier", points = { { 0.23, 1 }, { 0.32, 1 } } })
 hl.curve("easeInOutCubic", { type = "bezier", points = { { 0.65, 0.05 }, { 0.36, 1 } } })
 hl.animation({ leaf = "global", enabled = true, speed = 10, bezier = "default" })
-hl.animation({ leaf = "windows", enabled = true, speed = 4.8, bezier = "easeOutQuint" })
+-- Keep window transitions vertical so Alt+Tab does not feel like a side swipe.
+hl.animation({ leaf = "windows", enabled = true, speed = 4.8, bezier = "easeOutQuint", style = "slide bottom" })
 hl.animation({ leaf = "fade", enabled = true, speed = 3, bezier = "easeInOutCubic" })
 hl.animation({ leaf = "layers", enabled = true, speed = 3.8, bezier = "easeOutQuint" })
 hl.animation({ leaf = "workspaces", enabled = false })
 
 hl.bind(mod .. " + RETURN", hl.dsp.exec_cmd("ghostty"), { description = "Open terminal" })
 hl.bind(mod .. " + SPACE", function()
-  -- The launcher is always entered in English, regardless of the layout of
-  -- the window that had focus before it opened.
-  hl.exec_cmd("hyprctl switchxkblayout all 0")
+  -- The warm launcher captures/restores the previous layout through its IPC
+  -- handler, so opening it does not start a new Quickshell process.
   hl.exec_cmd(home .. "/.local/bin/nixos-launcher")
 end, { description = "Application launcher (English)" })
 hl.bind(mod .. " + CTRL + O", hl.dsp.exec_cmd("nixos-control-center"), { description = "Control center" })
@@ -72,12 +85,15 @@ hl.bind(mod .. " + SHIFT + CTRL + A", hl.dsp.exec_cmd("nixos-agents"), { descrip
 hl.bind(mod .. " + SHIFT + B", hl.dsp.exec_cmd("chromium"), { description = "Open browser" })
 hl.bind(mod .. " + SHIFT + F", hl.dsp.exec_cmd("nautilus --new-window"), { description = "Open files" })
 hl.bind(mod .. " + CTRL + M", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-menu"), { description = "Desktop menu" })
-hl.bind(mod .. " + ESCAPE", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-lock"), { description = "Lock session" })
+hl.bind(mod .. " + L", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-lock"), { description = "Lock session" })
 hl.bind(mod .. " + SHIFT + V", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-clipboard"), { description = "Clipboard history" })
 hl.bind(mod .. " + CTRL + SPACE", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-emoji"), { description = "Emoji picker" })
 hl.bind("PRINT", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-capture region"), { description = "Screenshot region" })
 hl.bind("SHIFT + PRINT", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-capture fullscreen"), { description = "Screenshot fullscreen" })
 hl.bind(mod .. " + PRINT", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-capture window"), { description = "Screenshot active window" })
+-- The GA503QS has no Print Screen key; its Fn+F6 hardware shortcut emits F6.
+hl.bind("F6", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-capture region"), { description = "Screenshot region (Fn+F6)" })
+hl.bind(mod .. " + SHIFT + S", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-capture region"), { description = "Screenshot region" })
 
 hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-volume up"), { description = "Volume up", locked = true, repeating = true })
 hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-volume down"), { description = "Volume down", locked = true, repeating = true })
@@ -85,6 +101,8 @@ hl.bind("XF86AudioMute", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-volume mute"
 hl.bind("XF86AudioMicMute", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-volume mic"), { description = "Mute microphone", locked = true })
 hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-brightness up"), { description = "Brightness up", locked = true, repeating = true })
 hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-brightness down"), { description = "Brightness down", locked = true, repeating = true })
+hl.bind("XF86KbdBrightnessUp", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-kbd-brightness up"), { description = "Keyboard brightness up", locked = true, repeating = true })
+hl.bind("XF86KbdBrightnessDown", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-kbd-brightness down"), { description = "Keyboard brightness down", locked = true, repeating = true })
 hl.bind(mod .. " + W", hl.dsp.window.close(), { description = "Close window" })
 hl.bind(mod .. " + F", hl.dsp.window.fullscreen(0), { description = "Fullscreen" })
 hl.bind(mod .. " + T", hl.dsp.window.float({ action = "toggle" }), { description = "Toggle floating" })
@@ -92,6 +110,42 @@ hl.bind(mod .. " + LEFT", hl.dsp.focus({ direction = "left" }), { description = 
 hl.bind(mod .. " + RIGHT", hl.dsp.focus({ direction = "right" }), { description = "Focus right" })
 hl.bind(mod .. " + UP", hl.dsp.focus({ direction = "up" }), { description = "Focus up" })
 hl.bind(mod .. " + DOWN", hl.dsp.focus({ direction = "down" }), { description = "Focus down" })
+
+local function focusNextWindowAcrossWorkspaces()
+  local active = hl.get_active_window()
+  if not active then return end
+
+  local windows = {}
+  for _, window in ipairs(hl.get_windows({ mapped = true })) do
+    local workspace = window.workspace
+    if workspace and workspace.id > 0 then
+      table.insert(windows, window)
+    end
+  end
+
+  if #windows < 2 then return end
+  table.sort(windows, function(a, b)
+    if a.workspace.id ~= b.workspace.id then return a.workspace.id < b.workspace.id end
+    return a.stable_id < b.stable_id
+  end)
+
+  local nextIndex = 1
+  for index, window in ipairs(windows) do
+    if window.address == active.address then
+      nextIndex = index % #windows + 1
+      break
+    end
+  end
+  local target = windows[nextIndex]
+  hl.dispatch(hl.dsp.focus({ window = target }))
+  hl.dispatch(hl.dsp.window.bring_to_top())
+end
+
+-- Match Omarchy: cycle focus, then reveal the newly active window above the
+-- fullscreen surface. Duplicate bindings intentionally run in this order.
+hl.bind("ALT + TAB", hl.dsp.window.cycle_next(), { description = "Next window on current workspace" })
+hl.bind("ALT + TAB", hl.dsp.window.bring_to_top(), { description = "Reveal active window on top" })
+hl.bind(mod .. " + TAB", focusNextWindowAcrossWorkspaces, { description = "Next window across all workspaces" })
 
 -- Universal clipboard shortcuts. Use physical keycodes for GUI apps so the
 -- injected chord still means C/V while the Ukrainian layout is active.

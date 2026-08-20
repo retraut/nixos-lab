@@ -4,6 +4,20 @@
 
 { config, pkgs, labUserName, ... }:
 
+let
+  goodixLibfprint = pkgs.callPackage ./packages/libfprint-goodix-521d.nix { };
+  goodixFprintdBase = pkgs.fprintd.override { libfprint = goodixLibfprint; };
+  goodixFprintd = goodixFprintdBase.overrideAttrs (old: {
+    postPatch = (old.postPatch or "") + ''
+      # fprintd 1.94.5 added one retry enum after the 1.94.1 driver fork.
+      # The older driver falls back to the generic retry result instead.
+      substituteInPlace meson.build \
+        --replace-fail "libfprint_min_version = '1.94.9'" "libfprint_min_version = '1.94.1'"
+      sed -i '/case FP_DEVICE_RETRY_TOO_FAST:/,+1d' src/device.c
+    '';
+  });
+in
+
 {
   # Bootloader.
   boot.loader.systemd-boot.enable = true;
@@ -30,6 +44,52 @@
   # after the first rebuild: `sudo tailscale up`.
   services.tailscale.enable = true;
   services.power-profiles-daemon.enable = true;
+
+  # Expose the firmware TPM 2.0 device to userspace tooling. This prepares the
+  # machine for measured boot and TPM-backed secrets without enrolling or
+  # sealing any keys yet.
+  security.tpm2.enable = true;
+
+  # Bitwarden's Linux desktop biometric unlock asks Polkit to authorize the
+  # `com.bitwarden.Bitwarden.unlock` action. Keep the policy declarative so
+  # the NixOS package can use the existing Polkit agent and PAM fingerprint
+  # setup without a manual file under /usr/share.
+  environment.etc."polkit-1/actions/com.bitwarden.Bitwarden.policy".text = ''
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE policyconfig PUBLIC
+      "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+      "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+    <policyconfig>
+      <action id="com.bitwarden.Bitwarden.unlock">
+        <description>Unlock Bitwarden</description>
+        <message>Authenticate to unlock Bitwarden</message>
+        <defaults>
+          <allow_any>no</allow_any>
+          <allow_inactive>no</allow_inactive>
+          <allow_active>auth_self</allow_active>
+        </defaults>
+      </action>
+    </policyconfig>
+  '';
+
+  # Goodix 27c6:521d support. Enrollment and repeated verification succeeded,
+  # so Polkit may now offer the sensor before falling back to the password.
+  services.dbus.packages = [ goodixFprintd ];
+  systemd.packages = [ goodixFprintd ];
+  services.udev.packages = [ goodixLibfprint ];
+  security.pam.services = {
+    "polkit-1".fprintAuth = true;
+    # Keep the reboot/display-manager entry password-only. Fingerprint auth is
+    # intentionally limited to the in-session Hyprlock and Polkit flows.
+    login.fprintAuth = false;
+    sddm.fprintAuth = false;
+    # Hyprlock handles fingerprint over fprintd's D-Bus API in parallel with
+    # the password-only PAM flow. This keeps password input immediately usable
+    # instead of waiting for the fingerprint attempts to finish first.
+    hyprlock = {
+      fprintAuth = false;
+    };
+  };
 
   # Set your time zone.
   time.timeZone = "Europe/Warsaw";
@@ -59,12 +119,25 @@
   users.users.${labUserName} = {
     isNormalUser = true;
     description = labUserName;
-    extraGroups = [ "networkmanager" "wheel" ];
+    extraGroups = [ "networkmanager" "tss" "wheel" ];
     packages = with pkgs; [];
   };
 
   # Allow unfree packages
   nixpkgs.config.allowUnfree = true;
+
+  # All lockscreen behavior, including the formerly external success-state PR,
+  # lives in one versioned local patch so a changed or closed PR cannot break
+  # the build.
+  nixpkgs.overlays = [
+    (final: prev: {
+      hyprlock = prev.hyprlock.overrideAttrs (old: {
+        patches = (old.patches or []) ++ [
+          ./hyprlock-fingerprint-mode.patch
+        ];
+      });
+    })
+  ];
 
   # Required for Home Manager's declarative dconf settings.
   programs.dconf.enable = true;
@@ -78,6 +151,11 @@
     vim # Do not forget to add an editor to edit configuration.nix! The Nano editor is also installed by default.
     wget
     htop
+    # Codex's sandbox runner. Keep it in the system profile so both the
+    # terminal Codex package and the official ChatGPT app can find `bwrap`.
+    bubblewrap
+    tpm2-tools
+    goodixFprintd
   ];
 
   # Link Home Manager's desktop and portal entries into the system profile.

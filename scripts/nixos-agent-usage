@@ -65,7 +65,10 @@ def find_model(value: Any) -> str:
             found = find_model(child)
             if found:
                 return found
-    return "codex"
+    # Empty means "not found in this branch". Returning the display fallback
+    # here would stop the recursive walk on the first unrelated scalar (often
+    # the event timestamp) before it reaches payload.state.model.
+    return ""
 
 
 def session_record(path: Path) -> dict[str, Any] | None:
@@ -81,7 +84,7 @@ def session_record(path: Path) -> dict[str, Any] | None:
                     continue
 
                 candidate = find_model(entry)
-                if candidate != "codex":
+                if candidate:
                     model = candidate
 
                 if entry.get("type") != "event_msg":

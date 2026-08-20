@@ -9,6 +9,7 @@ BarWidget {
   property bool hovered: button.containsMouse
   property color textColor: "#a9b1d6"
   property color accentColor: "#7aa2f7"
+  property color hoverColor: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.16)
   property int fontSize: 20
   property string fontFamily: "JetBrainsMono Nerd Font"
   readonly property var device: UPower.displayDevice
@@ -32,7 +33,7 @@ BarWidget {
     foreground: root.textColor
     active: root.hovered
     activeColor: root.accentColor
-    hoverColor: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.16)
+    hoverColor: root.hoverColor
     fontSize: root.fontSize
     fontFamily: root.fontFamily
     onPressed: root.activated()

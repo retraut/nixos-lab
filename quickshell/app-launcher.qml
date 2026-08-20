@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Io
 import Quickshell.Wayland
 
 // A small NixOS-native equivalent of Quattro's QML Apps menu. It consumes
@@ -14,6 +15,9 @@ ShellRoot {
   readonly property real uiScale: 1.5
   function px(value) { return Math.round(value * root.uiScale) }
 
+  property bool opened: Quickshell.env("NIXOS_LAUNCHER_OPEN") === "1"
+  property int previousLayout: 0
+  property bool layoutChanged: false
   property string query: ""
   property int selectedIndex: 0
   property int baseRowHeight: px(47)
@@ -83,8 +87,56 @@ ShellRoot {
     root.selectedIndex = Math.min(root.selectedIndex, Math.max(0, appModel.count - 1))
   }
 
+  function open() {
+    root.query = ""
+    root.selectedIndex = 0
+    panel.cardTop = -1
+    root.frozenRowsHeight = -1
+    root.opened = true
+    if (!layoutProcess.running) layoutProcess.running = true
+    Qt.callLater(function() { search.forceActiveFocus() })
+  }
+
   function close() {
-    Qt.quit()
+    if (root.layoutChanged) {
+      Quickshell.execDetached(["hyprctl", "switchxkblayout", "all", String(root.previousLayout)])
+      root.layoutChanged = false
+    }
+    root.opened = false
+  }
+
+  IpcHandler {
+    target: "nixos-launcher"
+
+    function open(): void { root.open() }
+    function close(): void { root.close() }
+    function toggle(): void { root.opened ? root.close() : root.open() }
+  }
+
+  Process {
+    id: layoutProcess
+    command: ["hyprctl", "-j", "devices"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (!root.opened) return
+        try {
+          var devices = JSON.parse(String(text || "{}"))
+          var keyboards = devices.keyboards || []
+          for (var i = 0; i < keyboards.length; i++) {
+            if (keyboards[i].main === true) {
+              var index = Number(keyboards[i].active_layout_index)
+              root.previousLayout = isNaN(index) ? 0 : index
+              break
+            }
+          }
+        } catch (error) {
+          root.previousLayout = 0
+        }
+        Quickshell.execDetached(["hyprctl", "switchxkblayout", "all", "0"])
+        root.layoutChanged = true
+      }
+    }
   }
 
   function freezeCardTop() {
@@ -106,7 +158,7 @@ ShellRoot {
 
   Component.onCompleted: {
     root.rebuild()
-    Qt.callLater(function() { search.forceActiveFocus() })
+    if (root.opened) Qt.callLater(function() { search.forceActiveFocus() })
   }
 
   Connections {
@@ -116,7 +168,7 @@ ShellRoot {
 
   PanelWindow {
     id: panel
-    visible: true
+    visible: root.opened
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore

@@ -39,6 +39,7 @@
         ./desktop.nix
         stylix.nixosModules.stylix
         ./theme.nix
+        ./lockscreen.nix
         home-manager.nixosModules.home-manager
       ];
       mkHost = hostModules: nixpkgs.lib.nixosSystem {

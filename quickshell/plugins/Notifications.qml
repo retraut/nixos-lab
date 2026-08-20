@@ -9,8 +9,9 @@ Item {
   id: root
 
   property var theme: null
+  property var dndState: null
   property bool centerOpen: false
-  property bool doNotDisturb: false
+  readonly property bool doNotDisturb: dndState ? dndState.doNotDisturb : false
   property bool dndToastVisible: false
   property var liveNotifications: ({})
   readonly property int historyLimit: 50
@@ -18,8 +19,32 @@ Item {
   ListModel { id: popupModel }
   ListModel { id: historyModel }
 
+  onDoNotDisturbChanged: {
+    if (root.doNotDisturb) popupModel.clear()
+    root.dndToastVisible = true
+    dndToastTimer.restart()
+  }
+
+  Timer {
+    id: dndToastTimer
+    interval: 2200
+    onTriggered: root.dndToastVisible = false
+  }
+
   function plainText(value) {
-    return String(value || "").replace(/<[^>]*>/g, "").replace(/&amp;/g, "&")
+    return String(value || "")
+      // Terminal applications may accidentally include ANSI CSI/OSC escape
+      // sequences in a desktop notification. Keep Ghostty notifications
+      // enabled, but never render those control sequences in the shell UI.
+      .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
+      .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, "\"")
+      .trim()
   }
 
   function addNotification(notification) {
@@ -92,17 +117,10 @@ Item {
   }
 
   function toggleDoNotDisturb() {
-    root.doNotDisturb = !root.doNotDisturb
+    if (!root.dndState) return false
+    root.dndState.doNotDisturb = !root.dndState.doNotDisturb
     if (root.doNotDisturb) popupModel.clear()
-    root.dndToastVisible = true
-    dndToastTimer.restart()
     return root.doNotDisturb
-  }
-
-  Timer {
-    id: dndToastTimer
-    interval: 2400
-    onTriggered: root.dndToastVisible = false
   }
 
   NotificationServer {
@@ -150,53 +168,44 @@ Item {
 
       Column {
         id: toastColumn
-        width: 430
+        width: Math.min(root.theme ? root.theme.popupWidth : 560, parent.width - 24)
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.topMargin: 44
-        anchors.rightMargin: 12
+        anchors.topMargin: root.theme ? root.theme.popupTopMargin : 44
+        anchors.rightMargin: root.theme ? root.theme.popupEdgeMargin : 12
         spacing: 8
 
         Rectangle {
           width: toastColumn.width
-          height: 72
+          height: 64
           visible: root.dndToastVisible
           color: root.theme ? Qt.rgba(root.theme.background.r, root.theme.background.g, root.theme.background.b, 0.97) : "#101315"
           border.width: 2
-          border.color: root.theme ? root.theme.accent : "#7aa2f7"
+          border.color: root.doNotDisturb
+            ? (root.theme ? root.theme.urgent : "#f7768e")
+            : (root.theme ? root.theme.accent : "#7aa2f7")
           radius: 0
 
           Row {
-            anchors.fill: parent
-            anchors.margins: 14
+            anchors.centerIn: parent
             spacing: 14
 
             Text {
-              anchors.verticalCenter: parent.verticalCenter
               text: root.doNotDisturb ? "󰂛" : "󰂚"
-              color: root.theme ? root.theme.accent : "#7aa2f7"
+              color: root.doNotDisturb
+                ? (root.theme ? root.theme.urgent : "#f7768e")
+                : (root.theme ? root.theme.accent : "#7aa2f7")
               font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
               font.pixelSize: 28
             }
 
-            Column {
+            Text {
               anchors.verticalCenter: parent.verticalCenter
-              spacing: 3
-
-              Text {
-                text: "Do Not Disturb"
-                color: root.theme ? root.theme.foreground : "#c0caf5"
-                font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
-                font.pixelSize: 17
-                font.bold: true
-              }
-
-              Text {
-                text: root.doNotDisturb ? "Enabled — notifications are muted" : "Disabled — notifications are visible"
-                color: root.theme ? root.theme.muted : "#9aa5ce"
-                font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
-                font.pixelSize: 13
-              }
+              text: root.doNotDisturb ? "Do Not Disturb enabled" : "Do Not Disturb disabled"
+              color: root.theme ? root.theme.foreground : "#c0caf5"
+              font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
+              font.pixelSize: 17
+              font.bold: true
             }
           }
         }
@@ -287,12 +296,12 @@ Item {
     MouseArea { anchors.fill: parent; onClicked: root.centerOpen = false }
 
     Rectangle {
-      width: 560
+      width: Math.min(root.theme ? root.theme.popupWidth : 560, parent.width - 24)
       height: Math.min(760, parent.height - 64)
       anchors.top: parent.top
       anchors.right: parent.right
-      anchors.topMargin: 44
-      anchors.rightMargin: 12
+      anchors.topMargin: root.theme ? root.theme.popupTopMargin : 44
+      anchors.rightMargin: root.theme ? root.theme.popupEdgeMargin : 12
       color: root.theme ? root.theme.background : "#101315"
       border.width: 2
       border.color: root.theme ? root.theme.border : "#414868"
@@ -302,7 +311,7 @@ Item {
 
       ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 16
+        anchors.margins: root.theme ? root.theme.popupPadding : 20
         spacing: 12
 
         RowLayout {
@@ -315,22 +324,6 @@ Item {
             font.bold: true
           }
           Item { Layout.fillWidth: true }
-          Rectangle {
-            width: dndText.implicitWidth + 18
-            height: 34
-            color: root.doNotDisturb && root.theme ? root.theme.selected : (root.theme ? root.theme.panel : "#24283b")
-            border.width: 1
-            border.color: root.theme ? root.theme.border : "#414868"
-            Text {
-              id: dndText
-              anchors.centerIn: parent
-              text: root.doNotDisturb ? "DND ON" : "DND"
-              color: root.theme ? root.theme.foreground : "#c0caf5"
-              font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
-              font.pixelSize: 14
-            }
-            MouseArea { anchors.fill: parent; onClicked: root.toggleDoNotDisturb() }
-          }
           Rectangle {
             width: clearText.implicitWidth + 18
             height: 34
@@ -352,7 +345,7 @@ Item {
         Text {
           Layout.alignment: Qt.AlignHCenter
           visible: historyModel.count === 0
-          text: root.doNotDisturb ? "Do Not Disturb is enabled" : "No notifications yet"
+          text: "No notifications yet"
           color: root.theme ? root.theme.muted : "#9aa5ce"
           font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
           font.pixelSize: 18

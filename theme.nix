@@ -40,8 +40,16 @@ let
       readonly property string fontFamily: "JetBrainsMono Nerd Font"
       // Single source of truth for bar and popup typography.
       readonly property int barFontSize: 20
-      readonly property int barIconSize: 24
+      readonly property int barIconSize: 20
+      readonly property int barIconSlotWidth: 30
+      readonly property int barIconSlotHeight: 30
       readonly property int widgetFontSize: 30
+      // Shared geometry for desktop popup surfaces. Weather intentionally
+      // stays wider because its hourly and weekly forecasts are horizontal.
+      readonly property int popupWidth: 560
+      readonly property int popupPadding: 20
+      readonly property int popupTopMargin: 44
+      readonly property int popupEdgeMargin: 12
       readonly property color scrim: Qt.rgba(base00.r, base00.g, base00.b, 0.50)
     }
   '';
@@ -57,69 +65,6 @@ let
       accent = "${rawColors.base0D}",
       urgent = "${rawColors.base08}",
       shadow = "0xee${rawColors.base00}",
-    }
-  '';
-
-  hyprlockTheme = ''
-    general {
-        disable_loading_bar = true
-        hide_cursor = true
-        grace = 0
-    }
-
-    background {
-        monitor =
-        path = /home/${labUserName}/.local/share/nixos-theme/tokyo-night-quattro.jpg
-        color = rgb(${rawColors.base00})
-        blur_passes = 3
-        blur_size = 8
-        noise = 0.018
-        contrast = 0.92
-        brightness = 0.72
-    }
-
-    label {
-        monitor =
-        text = $TIME
-        color = rgb(${rawColors.base05})
-        font_family = JetBrainsMono Nerd Font
-        font_size = 72
-        position = 0, 170
-        halign = center
-        valign = center
-    }
-
-    label {
-        monitor =
-        text = cmd[update:60000] date +"%A, %d %B"
-        color = rgb(${rawColors.base04})
-        font_family = JetBrainsMono Nerd Font
-        font_size = 22
-        position = 0, 105
-        halign = center
-        valign = center
-    }
-
-    input-field {
-        monitor =
-        size = 420, 68
-        outline_thickness = 3
-        dots_size = 0.24
-        dots_spacing = 0.32
-        dots_center = true
-        outer_color = rgb(${rawColors.base0D})
-        inner_color = rgb(${rawColors.base00})
-        font_color = rgb(${rawColors.base05})
-        fade_on_empty = false
-        placeholder_text = <span foreground="#${rawColors.base04}">Enter Password</span>
-        hide_input = false
-        check_color = rgb(${rawColors.base0A})
-        fail_color = rgb(${rawColors.base08})
-        fail_text = <span foreground="#${rawColors.base08}">$FAIL</span>
-        capslock_color = rgb(${rawColors.base09})
-        position = 0, -20
-        halign = center
-        valign = center
     }
   '';
 
@@ -184,7 +129,6 @@ in
     home.file = {
       ".config/quickshell/Theme.qml".text = quickshellTheme;
       ".config/hypr/theme.lua".text = hyprlandTheme;
-      ".config/hypr/hyprlock.conf".text = hyprlockTheme;
       ".config/fuzzel/fuzzel.ini".text = fuzzelTheme;
       ".local/share/nixos-theme/tokyo-night-quattro.jpg".source = ./assets/backgrounds/tokyo-night-quattro.jpg;
     };

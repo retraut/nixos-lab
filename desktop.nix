@@ -1,6 +1,8 @@
 { config, pkgs, lib, labUserName, ... }:
 
 let
+  codex = pkgs.callPackage ./codex.nix { };
+
   # OpenAI's official Linux ChatGPT/Codex app is distributed as a Debian
   # package. NixOS is not an officially supported target, so run the package
   # in an FHS environment while keeping the installation declarative.
@@ -9,7 +11,7 @@ let
     version = "26.810.52044";
     src = pkgs.fetchurl {
       url = "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb";
-      hash = "sha256-cIoVobt24rt/DjduUUU5H6J3rTpkBXwdMlN73CobTm4=";
+      hash = "sha256-R3iyanq9CGRyFNWwXBe9Pr4tlojRRtq/AXwaL6+TrH0=";
     };
     nativeBuildInputs = [ pkgs.libarchive ];
     dontUnpack = true;
@@ -58,6 +60,9 @@ let
     nss
     pango
     systemd
+    bubblewrap
+    # Codex Security's MCP manifest launches its server via `node`.
+    nodejs
     xdg-utils
     zlib
   ];
@@ -79,12 +84,73 @@ let
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postBuild = ''
       wrapProgram "$out/bin/chromium" \
-        --add-flags "--force-device-scale-factor=1.5"
+        --add-flags "--force-device-scale-factor=1.0"
     '';
   };
 
+  # Keep the display manager password-only, but give it a proper Tokyo Night
+  # presentation. The background is copied into the immutable theme package
+  # so the greeter does not depend on a user's home directory being mounted.
+  sddmAstronaut = (pkgs.sddm-astronaut.override {
+    embeddedTheme = "astronaut";
+    themeConfig = {
+      HeaderText = "";
+      HeaderTextColor = "#a9b1d6";
+      DateTextColor = "#7aa2f7";
+      TimeTextColor = "#c0caf5";
+      Background = "Backgrounds/tokyo-night-quattro.jpg";
+      FormBackgroundColor = "#1a1b26";
+      BackgroundColor = "#13141c";
+      DimBackgroundColor = "#13141c";
+      LoginFieldBackgroundColor = "#292e42";
+      PasswordFieldBackgroundColor = "#292e42";
+      LoginFieldTextColor = "#c0caf5";
+      PasswordFieldTextColor = "#c0caf5";
+      UserIconColor = "#7aa2f7";
+      PasswordIconColor = "#7aa2f7";
+      PlaceholderTextColor = "#565f89";
+      WarningColor = "#f7768e";
+      LoginButtonTextColor = "#1a1b26";
+      LoginButtonBackgroundColor = "#7aa2f7";
+      SystemButtonsIconsColor = "#a9b1d6";
+      SessionButtonTextColor = "#a9b1d6";
+      VirtualKeyboardButtonTextColor = "#a9b1d6";
+      DropdownTextColor = "#c0caf5";
+      DropdownSelectedBackgroundColor = "#292e42";
+      DropdownBackgroundColor = "#1a1b26";
+      HighlightTextColor = "#1a1b26";
+      HighlightBackgroundColor = "#7aa2f7";
+      HighlightBorderColor = "#7aa2f7";
+      HoverUserIconColor = "#bb9af7";
+      HoverPasswordIconColor = "#bb9af7";
+      HoverSystemButtonsIconsColor = "#bb9af7";
+      HoverSessionButtonTextColor = "#bb9af7";
+      HoverVirtualKeyboardButtonTextColor = "#bb9af7";
+      PartialBlur = "true";
+      BlurMax = "12";
+      Blur = "0.55";
+      HaveFormBackground = "true";
+      FormPosition = "center";
+      VirtualKeyboardPosition = "center";
+      HideVirtualKeyboard = "true";
+      HideSystemButtons = "false";
+      UseRealName = "true";
+      ForceLastUser = "true";
+      PasswordFocus = "true";
+      HideCompletePassword = "true";
+      AllowEmptyPassword = "false";
+    };
+  }).overrideAttrs (oldAttrs: {
+    installPhase = oldAttrs.installPhase + ''
+      chmod u+w $out/share/sddm/themes/sddm-astronaut-theme/Backgrounds/
+      cp ${./assets/backgrounds/tokyo-night-quattro.jpg} \
+        $out/share/sddm/themes/sddm-astronaut-theme/Backgrounds/tokyo-night-quattro.jpg
+    '';
+  });
+
   desktopPackages = with pkgs; [
     chatgptApp
+    t3code
     chromiumScaled
     quickshell
     gtk3
@@ -92,11 +158,13 @@ let
     slack
     bitwarden-desktop
     curl
+    gitMinimal
     eza
     gnome-calendar
     gnome-online-accounts
     screenfetch
     hyprsunset
+    wlsunset
     hypridle
     hyprlock
     nautilus
@@ -148,11 +216,35 @@ in
     xwayland.enable = true;
   };
 
-  services.displayManager.sddm.enable = true;
-  services.displayManager.sddm.wayland.enable = true;
+  # Steam needs NixOS' module rather than only the package so its 32-bit
+  # graphics stack and runtime integration are configured correctly.
+  programs.steam = {
+    enable = true;
+    package = pkgs.steam.override {
+      # Current Steam builds occasionally ignore the environment variable
+      # after their client re-exec. Pass the equivalent startup flag as well.
+      extraArgs = "-forcedesktopscaling 1.5";
+      extraEnv.STEAM_FORCE_DESKTOPUI_SCALING = "1.5";
+    };
+  };
+
+  services.displayManager.sddm = {
+    enable = true;
+    wayland.enable = true;
+    package = pkgs.kdePackages.sddm;
+    theme = "sddm-astronaut-theme";
+    extraPackages = [ pkgs.qt6Packages.qtvirtualkeyboard ];
+    settings = {
+      General.InputMethod = "qtvirtualkeyboard";
+      Theme.Current = "sddm-astronaut-theme";
+    };
+  };
   services.displayManager.defaultSession = "hyprland-uwsm";
 
-  security.polkit.enable = true;
+  security.polkit = {
+    enable = true;
+    enablePkexecWrapper = true;
+  };
   security.rtkit.enable = true;
 
   services.gnome.gnome-online-accounts.enable = true;
@@ -173,7 +265,7 @@ in
     ];
   };
 
-  environment.systemPackages = desktopPackages;
+  environment.systemPackages = desktopPackages ++ [ sddmAstronaut ];
 
   home-manager = {
     useGlobalPkgs = true;
@@ -190,7 +282,7 @@ in
 
       # Desktop applications live in the system package set above. Keep only
       # user-scoped tools here so the same packages are not declared twice.
-      home.packages = [ pkgs.codex ];
+      home.packages = [ codex pkgs.nodejs ];
 
       programs.bash = {
         enable = true;
@@ -200,6 +292,7 @@ in
           ll = "eza -la";
           exa = "eza";
           lt = "eza --tree --level=2 --long --icons --git";
+          restore_my_init_nixos_configuration = "sudo nixos-rebuild switch --flake /etc/nixos#laptop";
         };
       };
 
@@ -223,13 +316,35 @@ in
       };
 
       home.file = {
+        # Wi-Fi and Bluetooth are managed by the Quickshell control center.
+        # Override the system XDG autostart entries so their legacy tray
+        # applets stay hidden while NetworkManager, BlueZ and the advanced
+        # settings applications remain available.
+        ".config/autostart/nm-applet.desktop" = {
+          force = true;
+          text = ''
+            [Desktop Entry]
+            Type=Application
+            Name=NetworkManager Applet
+            Hidden=true
+          '';
+        };
+        ".config/autostart/blueman.desktop" = {
+          force = true;
+          text = ''
+            [Desktop Entry]
+            Type=Application
+            Name=Blueman Applet
+            Hidden=true
+          '';
+        };
         ".local/share/applications/bitwarden.desktop" = {
           force = true;
           text = ''
             [Desktop Entry]
             Categories=Utility
             Comment=Secure and free password manager for all of your devices
-            Exec=bitwarden --force-device-scale-factor=1.5 %U
+            Exec=bitwarden --force-device-scale-factor=1.0 %U
             Icon=bitwarden
             MimeType=x-scheme-handler/bitwarden
             Name=Bitwarden
@@ -244,7 +359,7 @@ in
             Type=Application
             Name=Bitwarden
             Comment=Declarative scaled Bitwarden autostart
-            Exec=bitwarden --force-device-scale-factor=1.5 --autostart
+            Exec=bitwarden --force-device-scale-factor=1.0 --autostart
             StartupNotify=false
             Terminal=false
           '';
@@ -330,6 +445,10 @@ in
           source = ./scripts/nixos-menu;
           executable = true;
         };
+        ".local/bin/nixos-rebuild" = {
+          source = ./scripts/nixos-rebuild;
+          executable = true;
+        };
         ".local/bin/nixos-background" = {
           source = ./scripts/nixos-background;
           executable = true;
@@ -340,6 +459,14 @@ in
         };
         ".local/bin/nixos-brightness" = {
           source = ./scripts/nixos-brightness;
+          executable = true;
+        };
+        ".local/bin/nixos-night-shift" = {
+          source = ./scripts/nixos-night-shift;
+          executable = true;
+        };
+        ".local/bin/nixos-kbd-brightness" = {
+          source = ./scripts/nixos-kbd-brightness;
           executable = true;
         };
         ".local/bin/nixos-lock" = {
@@ -374,7 +501,7 @@ in
             ExecStart = "%h/.local/bin/nixos-shell";
             Restart = "on-failure";
             RestartSec = 1;
-            Environment = [ userServiceEnvironment ];
+            Environment = [ userServiceEnvironment "QS_NO_RELOAD_POPUP=1" ];
           };
           Install.WantedBy = [ "graphical-session.target" ];
         };
@@ -419,6 +546,21 @@ in
             ExecStart = "${pkgs.hypridle}/bin/hypridle -c %h/.config/hypr/hypridle.conf";
             Restart = "on-failure";
             RestartSec = 1;
+            Environment = [ userServiceEnvironment ];
+          };
+          Install.WantedBy = [ "graphical-session.target" ];
+        };
+
+        nixos-night-shift = {
+          Unit = {
+            Description = "Automatic Wayland night-shift display filter";
+            PartOf = [ "graphical-session.target" ];
+            After = [ "graphical-session.target" ];
+          };
+          Service = {
+            ExecStart = "%h/.local/bin/nixos-night-shift";
+            Restart = "on-failure";
+            RestartSec = 300;
             Environment = [ userServiceEnvironment ];
           };
           Install.WantedBy = [ "graphical-session.target" ];

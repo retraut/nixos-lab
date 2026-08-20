@@ -4,9 +4,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 
-// NixOS-native port of the live retraut.control-center.  Its typography is
-// intentionally independent from the 150% launcher scale: this is a compact
-// information surface, not a search UI.
+// NixOS-native port of the live retraut.control-center.
 ShellRoot {
   id: root
 
@@ -85,12 +83,12 @@ ShellRoot {
 
     Rectangle {
       id: card
-      width: 480
-      height: root.activePanel === "" ? 540 : 610
+      width: Math.min(theme.popupWidth, parent.width - theme.popupEdgeMargin * 2)
+      height: Math.min(root.activePanel === "" ? 620 : 700, parent.height - theme.popupTopMargin - theme.popupEdgeMargin)
       anchors.top: parent.top
       anchors.right: parent.right
-      anchors.topMargin: 44
-      anchors.rightMargin: 12
+      anchors.topMargin: theme.popupTopMargin
+      anchors.rightMargin: theme.popupEdgeMargin
       color: theme.background
       border.width: 1
       border.color: theme.border
@@ -108,7 +106,7 @@ ShellRoot {
       ColumnLayout {
         id: dashboard
         anchors.fill: parent
-        anchors.margins: 18
+        anchors.margins: theme.popupPadding
         spacing: 10
         visible: root.activePanel === ""
 
@@ -291,7 +289,7 @@ ShellRoot {
       Loader {
         id: detailsLoader
         anchors.fill: parent
-        anchors.margins: 18
+        anchors.margins: theme.popupPadding
         active: root.activePanel !== ""
         source: Qt.resolvedUrl("control-panel.qml")
         onLoaded: if (item) item.panelKind = root.activePanel

@@ -13,6 +13,10 @@ ShellRoot {
 
   Theme { id: theme }
 
+  readonly property int titleSize: 20
+  readonly property int bodySize: 15
+  readonly property int captionSize: 13
+
   readonly property var device: UPower.displayDevice
   readonly property bool present: !!device && device.isPresent
   readonly property bool discharging: present && UPower.onBattery
@@ -98,14 +102,14 @@ ShellRoot {
 
     Rectangle {
       id: card
-      implicitWidth: content.implicitWidth + 36
-      implicitHeight: content.implicitHeight + 36
-      width: Math.min(Math.max(426, implicitWidth), 1200)
-      height: Math.min(Math.max(556, implicitHeight), 900)
+      implicitWidth: content.implicitWidth + theme.popupPadding * 2
+      implicitHeight: content.implicitHeight + theme.popupPadding * 2
+      width: Math.min(theme.popupWidth, panel.width - theme.popupEdgeMargin * 2)
+      height: Math.min(Math.max(620, implicitHeight), panel.height - theme.popupTopMargin - theme.popupEdgeMargin)
       anchors.top: parent.top
       anchors.right: parent.right
-      anchors.topMargin: 44
-      anchors.rightMargin: 12
+      anchors.topMargin: theme.popupTopMargin
+      anchors.rightMargin: theme.popupEdgeMargin
       radius: 0
       color: theme.background
       border.width: 1
@@ -121,7 +125,7 @@ ShellRoot {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.margins: 18
+        anchors.margins: theme.popupPadding
         spacing: 10
 
         RowLayout {
@@ -130,8 +134,8 @@ ShellRoot {
           Text { text: root.batteryIcon; color: theme.foreground; font.pixelSize: 25 }
           Column {
             spacing: 1
-            Text { text: "Battery"; color: theme.foreground; font.pixelSize: theme.widgetFontSize; font.weight: Font.Medium }
-            Text { text: root.stateText.toUpperCase(); color: theme.muted; font.pixelSize: theme.widgetFontSize; font.letterSpacing: 1.1 }
+            Text { text: "Battery"; color: theme.foreground; font.pixelSize: root.titleSize; font.weight: Font.Medium }
+            Text { text: root.stateText.toUpperCase(); color: theme.muted; font.pixelSize: root.captionSize; font.letterSpacing: 1.1 }
           }
           Item { Layout.fillWidth: true }
           Text { text: root.percentageText; color: theme.foreground; font.pixelSize: 28; font.weight: Font.DemiBold }
@@ -165,9 +169,9 @@ ShellRoot {
             delegate: RowLayout {
               required property var modelData
               Layout.fillWidth: true
-              Text { text: modelData.label; color: theme.muted; font.pixelSize: theme.widgetFontSize }
+              Text { text: modelData.label; color: theme.muted; font.pixelSize: root.captionSize }
               Item { Layout.fillWidth: true }
-              Text { text: modelData.value; color: theme.foreground; font.pixelSize: theme.widgetFontSize }
+              Text { text: modelData.value; color: theme.foreground; font.pixelSize: root.bodySize }
             }
           }
         }
@@ -177,21 +181,21 @@ ShellRoot {
         ColumnLayout {
           Layout.fillWidth: true
           spacing: 7
-          Text { text: "TOP CPU · 5S"; color: theme.muted; font.pixelSize: theme.widgetFontSize; font.weight: Font.Medium }
+          Text { text: "TOP CPU · 5S"; color: theme.muted; font.pixelSize: root.captionSize; font.weight: Font.Medium }
           Repeater {
             model: root.topProcesses
             delegate: RowLayout {
               required property var modelData
               Layout.fillWidth: true
-              Text { text: modelData.name; color: theme.foreground; opacity: 0.75; font.pixelSize: theme.widgetFontSize; elide: Text.ElideRight; Layout.fillWidth: true }
-              Text { text: modelData.cpu + "%"; color: theme.foreground; font.pixelSize: theme.widgetFontSize }
+              Text { text: modelData.name; color: theme.foreground; opacity: 0.75; font.pixelSize: root.bodySize; elide: Text.ElideRight; Layout.fillWidth: true }
+              Text { text: modelData.cpu + "%"; color: theme.foreground; font.pixelSize: root.bodySize }
             }
           }
         }
 
         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.16) }
 
-        Text { text: "POWER PROFILE"; color: theme.muted; font.pixelSize: theme.widgetFontSize; font.weight: Font.Medium }
+        Text { text: "POWER PROFILE"; color: theme.muted; font.pixelSize: root.captionSize; font.weight: Font.Medium }
 
         RowLayout {
           Layout.fillWidth: true
@@ -210,7 +214,7 @@ ShellRoot {
                 anchors.centerIn: parent
                 spacing: 2
                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.icon; color: root.activeProfile === modelData.id ? theme.accent : theme.foreground; font.pixelSize: 17 }
-                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: theme.foreground; font.pixelSize: theme.widgetFontSize }
+                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: theme.foreground; font.pixelSize: root.captionSize }
               }
               MouseArea { anchors.fill: parent; onClicked: root.setProfile(modelData.id) }
             }

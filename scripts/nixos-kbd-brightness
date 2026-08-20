@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+device='asus::kbd_backlight'
+
+if ! brightnessctl --device="$device" info >/dev/null 2>&1; then
+  exit 0
+fi
+
+case "${1:-}" in
+  up) brightnessctl --device="$device" set +1 >/dev/null ;;
+  down) brightnessctl --device="$device" set 1- >/dev/null ;;
+  *)
+    printf 'usage: %s {up|down}\n' "$0" >&2
+    exit 2
+    ;;
+esac

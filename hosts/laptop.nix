@@ -1,7 +1,7 @@
 { lib, labUserName, ... }:
 
 {
-  networking.hostName = "nixos-laptop";
+  networking.hostName = "zephyrus";
 
   # Keep VM-only services and conveniences out of the physical host.
   services.qemuGuest.enable = false;

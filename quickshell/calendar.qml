@@ -41,13 +41,13 @@ ShellRoot {
 
     Rectangle {
       id: card
-      implicitWidth: content.implicitWidth + 36
-      implicitHeight: content.implicitHeight + 36
-      width: Math.min(Math.max(366, implicitWidth), 900)
-      height: Math.min(Math.max(396, implicitHeight), 900)
+      implicitWidth: content.implicitWidth + theme.popupPadding * 2
+      implicitHeight: content.implicitHeight + theme.popupPadding * 2
+      width: Math.min(theme.popupWidth, panel.width - 48)
+      height: Math.min(Math.max(500, implicitHeight), panel.height - theme.popupTopMargin - theme.popupEdgeMargin)
       anchors.horizontalCenter: parent.horizontalCenter
       anchors.top: parent.top
-      anchors.topMargin: 44
+      anchors.topMargin: theme.popupTopMargin
       radius: 0
       color: theme.background
       border.width: 1
@@ -65,7 +65,7 @@ ShellRoot {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.margins: 18
+        anchors.margins: theme.popupPadding
         spacing: 12
 
         RowLayout {

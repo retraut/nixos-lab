@@ -6,6 +6,7 @@ Item {
   id: root
 
   property var theme: null
+  property var notificationState: null
   // Match the current Omarchy workstation: opaque by default, with the
   // existing double-click gesture still available for a transparent view.
   property bool transparentMode: false
@@ -17,6 +18,8 @@ Item {
   readonly property color selected: theme ? theme.selected : "#2a2a2a"
   readonly property int barFontSize: theme ? theme.barFontSize : 16
   readonly property int barIconSize: theme ? theme.barIconSize : (barFontSize + 4)
+  readonly property int barIconSlotWidth: theme ? theme.barIconSlotWidth : 30
+  readonly property int barIconSlotHeight: theme ? theme.barIconSlotHeight : 30
   readonly property string barFontFamily: theme ? theme.fontFamily : "JetBrainsMono Nerd Font"
 
   function openWeather(mode) {
@@ -62,6 +65,12 @@ Item {
 
     MenuButton {
       Layout.alignment: Qt.AlignVCenter
+      Layout.minimumWidth: root.barIconSlotWidth
+      Layout.preferredWidth: root.barIconSlotWidth
+      Layout.maximumWidth: root.barIconSlotWidth
+      Layout.minimumHeight: root.barIconSlotHeight
+      Layout.preferredHeight: root.barIconSlotHeight
+      Layout.maximumHeight: root.barIconSlotHeight
       theme: root.theme
       fontSize: root.barIconSize
       fontFamily: root.barFontFamily
@@ -91,9 +100,12 @@ Item {
         Item {
           id: weatherSlot
           Layout.alignment: Qt.AlignVCenter
-          Layout.preferredWidth: 30
-          Layout.minimumWidth: 30
-          Layout.preferredHeight: 28
+          Layout.preferredWidth: root.barIconSlotWidth
+          Layout.minimumWidth: root.barIconSlotWidth
+          Layout.maximumWidth: root.barIconSlotWidth
+          Layout.preferredHeight: root.barIconSlotHeight
+          Layout.minimumHeight: root.barIconSlotHeight
+          Layout.maximumHeight: root.barIconSlotHeight
           z: 10
 
           Weather {
@@ -133,33 +145,74 @@ Item {
 
     NotificationBell {
       Layout.alignment: Qt.AlignVCenter
+      Layout.minimumWidth: root.barIconSlotWidth
+      Layout.preferredWidth: root.barIconSlotWidth
+      Layout.maximumWidth: root.barIconSlotWidth
+      Layout.minimumHeight: root.barIconSlotHeight
+      Layout.preferredHeight: root.barIconSlotHeight
+      Layout.maximumHeight: root.barIconSlotHeight
       theme: root.theme
+      doNotDisturb: root.notificationState ? root.notificationState.doNotDisturb : false
       fontSize: root.barIconSize
       fontFamily: root.barFontFamily
+      onActivated: Quickshell.execDetached([
+        "quickshell", "ipc", "--path",
+        Quickshell.env("HOME") + "/.config/quickshell/shell.qml",
+        "--any-display", "--newest", "call",
+        "nixos-notifications", "toggleCenter"
+      ])
+      onSecondaryActivated: {
+        if (root.notificationState)
+          root.notificationState.doNotDisturb = !root.notificationState.doNotDisturb
+      }
     }
 
     Agents {
       Layout.alignment: Qt.AlignVCenter
+      Layout.minimumWidth: root.barIconSlotWidth
+      Layout.preferredWidth: root.barIconSlotWidth
+      Layout.maximumWidth: root.barIconSlotWidth
+      Layout.minimumHeight: root.barIconSlotHeight
+      Layout.preferredHeight: root.barIconSlotHeight
+      Layout.maximumHeight: root.barIconSlotHeight
       textColor: root.foreground
       accentColor: root.accent
+      hoverColor: root.selected
       fontSize: root.barIconSize
       fontFamily: root.barFontFamily
       onActivated: Quickshell.execDetached(["sh", "-lc", "exec \"$HOME/.local/bin/nixos-agents\""])
-      onLaunchRequested: Quickshell.execDetached(["ghostty", "--title=Codex", "-e", "codex"])
+      onLaunchRequested: Quickshell.execDetached([
+        "ghostty", "--title=Codex", "-e", "sh", "-lc",
+        "cd \"$HOME/Work\" && exec codex"
+      ])
     }
 
     Battery {
       Layout.alignment: Qt.AlignVCenter
+      Layout.minimumWidth: root.barIconSlotWidth
+      Layout.preferredWidth: root.barIconSlotWidth
+      Layout.maximumWidth: root.barIconSlotWidth
+      Layout.minimumHeight: root.barIconSlotHeight
+      Layout.preferredHeight: root.barIconSlotHeight
+      Layout.maximumHeight: root.barIconSlotHeight
       textColor: root.foreground
       fontSize: root.barIconSize
+      hoverColor: root.selected
       fontFamily: root.barFontFamily
       onActivated: Quickshell.execDetached(["sh", "-lc", "exec \"$HOME/.local/bin/nixos-battery\""])
     }
 
     ControlCenter {
       Layout.alignment: Qt.AlignVCenter
+      Layout.minimumWidth: root.barIconSlotWidth
+      Layout.preferredWidth: root.barIconSlotWidth
+      Layout.maximumWidth: root.barIconSlotWidth
+      Layout.minimumHeight: root.barIconSlotHeight
+      Layout.preferredHeight: root.barIconSlotHeight
+      Layout.maximumHeight: root.barIconSlotHeight
       textColor: root.foreground
       accentColor: root.accent
+      hoverColor: root.selected
       fontSize: root.barIconSize
       fontFamily: root.barFontFamily
       onActivated: Quickshell.execDetached(["sh", "-lc", "exec \"$HOME/.local/bin/nixos-control-center\""])

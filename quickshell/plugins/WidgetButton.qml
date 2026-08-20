@@ -15,6 +15,7 @@ Item {
   property color activeColor: foreground
   property bool active: false
   property bool useActiveColor: true
+  property bool hoverEnabled: true
   property bool labelVisible: true
   property bool hasVisualContent: text !== ""
   property real horizontalMargin: 5
@@ -39,8 +40,10 @@ Item {
   implicitHeight: fixedHeight > 0 ? fixedHeight : Math.max(24, label.implicitHeight + verticalPadding * 2)
 
   Rectangle {
-    anchors.fill: parent
-    color: root.containsMouse ? root.hoverColor : "transparent"
+    width: root.fixedWidth > 0 ? root.fixedWidth : parent.width
+    height: root.fixedHeight > 0 ? root.fixedHeight : parent.height
+    anchors.centerIn: parent
+    color: root.hoverEnabled && root.containsMouse ? root.hoverColor : "transparent"
     radius: 0
   }
 
@@ -58,7 +61,9 @@ Item {
 
   MouseArea {
     id: mouseArea
-    anchors.fill: parent
+    width: root.fixedWidth > 0 ? root.fixedWidth : parent.width
+    height: root.fixedHeight > 0 ? root.fixedHeight : parent.height
+    anchors.centerIn: parent
     acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
     enabled: root.interactive
     hoverEnabled: true
