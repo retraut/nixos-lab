@@ -24,9 +24,9 @@ cp "$codex_file" "$backup_file"
 cp "$codex_file" "$tmp_file"
 
 sed -i \
-  -e "s/version = \"[^\"]*\";/version = \"$version\";/" \
-  -e "s/codexHash = \"sha256-[^\"]*\";/codexHash = \"$codex_hash\";/" \
-  -e "s/hostHash = \"sha256-[^\"]*\";/hostHash = \"$host_hash\";/" \
+  -e "s|version = \"[^\"]*\";|version = \"$version\";|" \
+  -e "s|codexHash = \"sha256-[^\"]*\";|codexHash = \"$codex_hash\";|" \
+  -e "s|hostHash = \"sha256-[^\"]*\";|hostHash = \"$host_hash\";|" \
   "$tmp_file"
 mv "$tmp_file" "$codex_file"
 

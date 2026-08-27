@@ -2,16 +2,24 @@
 
 let
   codex = pkgs.callPackage ./codex.nix { };
+  commandCode = pkgs.callPackage ./packages/command-code.nix { };
+  desktopDaemon = pkgs.rustPlatform.buildRustPackage {
+    pname = "nixos-desktop-daemon";
+    version = "0.1.0";
+    src = ./packages/nixos-desktop-daemon;
+    cargoLock.lockFile = ./packages/nixos-desktop-daemon/Cargo.lock;
+    meta.mainProgram = "nixos-desktop-daemon";
+  };
 
   # OpenAI's official Linux ChatGPT/Codex app is distributed as a Debian
   # package. NixOS is not an officially supported target, so run the package
   # in an FHS environment while keeping the installation declarative.
   chatgptUnwrapped = pkgs.stdenvNoCC.mkDerivation {
     pname = "chatgpt-official";
-    version = "26.810.52044";
+    version = "26.818.61809";
     src = pkgs.fetchurl {
       url = "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb";
-      hash = "sha256-R3iyanq9CGRyFNWwXBe9Pr4tlojRRtq/AXwaL6+TrH0=";
+      hash = "sha256-G7piptvS1Jl1xihQ2O3arWBdoZNVexlJgiJeVrGUGJE=";
     };
     nativeBuildInputs = [ pkgs.libarchive ];
     dontUnpack = true;
@@ -26,7 +34,8 @@ let
 
   chatgptRun = pkgs.writeShellScript "chatgpt-run" ''
     cd ${chatgptUnwrapped}/usr/lib/chatgpt
-    exec ${chatgptUnwrapped}/usr/lib/chatgpt/ChatGPT --force-device-scale-factor=1.5 "$@"
+    exec ${chatgptUnwrapped}/usr/lib/chatgpt/ChatGPT \
+      --ozone-platform=wayland "$@"
   '';
 
   # Debian/FHS compatibility libraries for the official ChatGPT binary.
@@ -46,6 +55,7 @@ let
     gtk3
     libdrm
     libgbm
+    libglvnd
     libnotify
     libx11
     libxcb
@@ -55,6 +65,7 @@ let
     libxfixes
     libxkbcommon
     libxrandr
+    libva
     mesa
     nspr
     nss
@@ -192,6 +203,7 @@ let
     bitwarden-desktop
     curl
     lsof
+    powertop
     gitMinimal
     eza
     gnome-calendar
@@ -205,7 +217,6 @@ let
     hyprlock
     nautilus
     jq
-    python3
     libnotify
     wl-clipboard
     wtype
@@ -214,6 +225,7 @@ let
     brightnessctl
     bluez
     blueman
+    python3
     networkmanagerapplet
     pavucontrol
     qrencode
@@ -260,8 +272,8 @@ in
     package = pkgs.steam.override {
       # Current Steam builds occasionally ignore the environment variable
       # after their client re-exec. Pass the equivalent startup flag as well.
-      extraArgs = "-forcedesktopscaling 1.5";
-      extraEnv.STEAM_FORCE_DESKTOPUI_SCALING = "1.5";
+      extraArgs = "-forcedesktopscaling 1.25";
+      extraEnv.STEAM_FORCE_DESKTOPUI_SCALING = "1.25";
     };
   };
 
@@ -270,7 +282,11 @@ in
     wayland.enable = true;
     package = pkgs.kdePackages.sddm;
     theme = "sddm-astronaut-theme";
-    extraPackages = [ pkgs.qt6Packages.qtvirtualkeyboard ];
+    extraPackages = [
+      pkgs.kdePackages.qtmultimedia
+      pkgs.kdePackages.qtsvg
+      pkgs.qt6Packages.qtvirtualkeyboard
+    ];
     settings = {
       General.InputMethod = "qtvirtualkeyboard";
       Theme.Current = "sddm-astronaut-theme";
@@ -302,6 +318,14 @@ in
     ];
   };
 
+  programs.chromium = {
+    enable = true;
+    extensions = [
+      "nngceckbapebfimnlniiiahkandclblb;https://clients2.google.com/service/update2/crx"
+      "bgnkhhnnamicmpeenaelnjfhikgbkllg;https://clients2.google.com/service/update2/crx"
+    ];
+  };
+
   environment.systemPackages = desktopPackages ++ [ sddmAstronaut ];
 
   home-manager = {
@@ -319,7 +343,7 @@ in
 
       # Desktop applications live in the system package set above. Keep only
       # user-scoped tools here so the same packages are not declared twice.
-      home.packages = [ codex pkgs.nodejs ];
+      home.packages = [ codex commandCode pkgs.nodejs ];
 
       programs.bash = {
         enable = true;
@@ -442,6 +466,18 @@ in
             Hidden=true
           '';
         };
+        # Handy is disabled for now because its setup was not completed.
+        # Keep this override so the stale profile autostart entry stays off;
+        # remove it when we are ready to revisit Handy.
+        ".config/autostart/Handy.desktop" = {
+          force = true;
+          text = ''
+            [Desktop Entry]
+            Type=Application
+            Name=Handy
+            Hidden=true
+          '';
+        };
         ".local/share/applications/bitwarden.desktop" = {
           force = true;
           text = ''
@@ -480,6 +516,30 @@ in
           StartupNotify=true
         '';
         ".local/share/icons/hicolor/scalable/apps/x-logo.svg".source = ./assets/icons/x-logo.svg;
+        ".local/share/applications/youtube.desktop".text = ''
+          [Desktop Entry]
+          Name=YouTube
+          Comment=YouTube web app
+          Exec=chromium --app=https://www.youtube.com
+          Icon=youtube
+          Terminal=false
+          Type=Application
+          Categories=AudioVideo;Network;WebBrowser;
+          StartupNotify=true
+        '';
+        ".local/share/icons/hicolor/scalable/apps/youtube.svg".source = ./assets/icons/youtube.svg;
+        ".local/share/applications/gmail.desktop".text = ''
+          [Desktop Entry]
+          Name=Gmail
+          Comment=Gmail web app
+          Exec=chromium --app=https://mail.google.com/mail/u/0/
+          Icon=gmail
+          Terminal=false
+          Type=Application
+          Categories=Office;Network;WebBrowser;
+          StartupNotify=true
+        '';
+        ".local/share/icons/hicolor/scalable/apps/gmail.svg".source = ./assets/icons/gmail.svg;
         ".config/hypr/hyprland.lua".source = ./hyprland.lua;
         ".config/hypr/hypridle.conf".source = ./hypridle.conf;
         ".config/quickshell/shell.qml".source = ./quickshell/shell.qml;
@@ -525,8 +585,8 @@ in
           source = ./scripts/nixos-window-layout;
           executable = true;
         };
-        ".local/bin/nixos-system-stats" = {
-          source = ./scripts/nixos-system-stats;
+        ".local/bin/nixos-desktop-daemon" = {
+          source = "${desktopDaemon}/bin/nixos-desktop-daemon";
           executable = true;
         };
         ".local/bin/nixos-control-state" = {
@@ -539,10 +599,6 @@ in
         };
         ".local/bin/nixos-wifi-qr" = {
           source = ./scripts/nixos-wifi-qr;
-          executable = true;
-        };
-        ".local/bin/nixos-agent-usage" = {
-          source = ./scripts/nixos-agent-usage;
           executable = true;
         };
         ".local/bin/nixos-menu" = {
@@ -563,10 +619,6 @@ in
         };
         ".local/bin/nixos-brightness" = {
           source = ./scripts/nixos-brightness;
-          executable = true;
-        };
-        ".local/bin/nixos-night-shift" = {
-          source = ./scripts/nixos-night-shift;
           executable = true;
         };
         ".local/bin/nixos-kbd-brightness" = {
@@ -629,6 +681,21 @@ in
           Install.WantedBy = [ "graphical-session.target" ];
         };
 
+        nixos-desktop-daemon = {
+          Unit = {
+            Description = "NixOS desktop state and night-shift daemon";
+            PartOf = [ "graphical-session.target" ];
+            After = [ "graphical-session.target" ];
+          };
+          Service = {
+            ExecStart = "${desktopDaemon}/bin/nixos-desktop-daemon";
+            Restart = "on-failure";
+            RestartSec = 1;
+            Environment = [ userServiceEnvironment ];
+          };
+          Install.WantedBy = [ "graphical-session.target" ];
+        };
+
         nixos-window-layout = {
           Unit = {
             Description = "Per-window keyboard layouts";
@@ -654,21 +721,6 @@ in
             ExecStart = "${pkgs.hypridle}/bin/hypridle -c %h/.config/hypr/hypridle.conf";
             Restart = "on-failure";
             RestartSec = 1;
-            Environment = [ userServiceEnvironment ];
-          };
-          Install.WantedBy = [ "graphical-session.target" ];
-        };
-
-        nixos-night-shift = {
-          Unit = {
-            Description = "Automatic Wayland night-shift display filter";
-            PartOf = [ "graphical-session.target" ];
-            After = [ "graphical-session.target" ];
-          };
-          Service = {
-            ExecStart = "%h/.local/bin/nixos-night-shift";
-            Restart = "on-failure";
-            RestartSec = 300;
             Environment = [ userServiceEnvironment ];
           };
           Install.WantedBy = [ "graphical-session.target" ];

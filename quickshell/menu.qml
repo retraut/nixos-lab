@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Io
 import Quickshell.Wayland
 
 // NixOS-native root menu modeled after Omarchy's centered menu surface.
@@ -15,7 +16,7 @@ ShellRoot {
   readonly property int detailFontSize: 12
 
   readonly property var items: [
-    { title: "Rebuild NixOS", detail: "Apply config without restarting the GUI", icon: "󰚰", command: ["ghostty", "--title=NixOS Rebuild", "-e", "nixos-rebuild"] },
+    { title: "Rebuild NixOS", detail: "Apply config without restarting the GUI", icon: "󰚰", command: ["ghostty", "--title=NixOS Rebuild", "-e", Quickshell.env("HOME") + "/.local/bin/nixos-rebuild"] },
     // This is intentionally separate from the rebuild action, but calls the
     // shell's in-process reload so other GUI applications stay untouched.
     { title: "Restart shell", detail: "Reload only Quickshell; keep apps open", icon: "󰑐", command: ["quickshell", "ipc", "--path", Quickshell.env("HOME") + "/.config/quickshell/shell.qml", "call", "nixos-shell", "reload"] },
@@ -25,10 +26,19 @@ ShellRoot {
     { title: "Screenshot window", detail: "Super + Print", icon: "󱣴", command: ["nixos-capture", "window"] },
     { title: "Screenshot fullscreen", detail: "Shift + Print", icon: "󰍹", command: ["nixos-capture", "fullscreen"] },
     { title: "Notifications", detail: "Super + N", icon: "󰂚", command: ["quickshell", "ipc", "--path", Quickshell.env("HOME") + "/.config/quickshell/shell.qml", "call", "nixos-notifications", "toggleCenter"] },
-    { title: "Lock session", detail: "Super + L", icon: "󰌾", command: ["nixos-lock"] }
+    { title: "Lock session", detail: "Super + L", icon: "󰌾", command: ["nixos-lock"] },
+    { title: "Power off", detail: "Shut down the computer", icon: "󰐥", command: ["systemctl", "poweroff"], danger: true }
   ]
 
   function close() { Qt.quit() }
+
+  IpcHandler {
+    target: "nixos-menu"
+    function close(): string {
+      root.close()
+      return "closed"
+    }
+  }
 
   PanelWindow {
     id: panel
@@ -43,7 +53,11 @@ ShellRoot {
     Rectangle {
       anchors.fill: parent
       color: "transparent"
-      MouseArea { anchors.fill: parent; onClicked: root.close() }
+      MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onClicked: root.close()
+      }
     }
 
     Rectangle {

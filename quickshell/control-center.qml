@@ -11,6 +11,7 @@ ShellRoot {
   Theme { id: theme }
 
   property var stats: ({})
+  property string activePowerProfile: ""
   property string activePanel: ""
   readonly property int textSmall: 13
   readonly property int textBody: 15
@@ -26,8 +27,29 @@ ShellRoot {
       { label: "Display", icon: "󰍹", kind: "display", available: true, detail: "Monitors & brightness" },
       { label: "Tailscale", icon: "󰒍", kind: "tailscale", available: caps.tailscale === true,
         detail: caps.tailscale === true ? "Tailnet" : "Not installed" },
-      { label: "Power", icon: "󰌪", kind: "power", available: true, detail: "Performance profile" }
+      { label: "Power", icon: "󰌪", kind: "power", available: true,
+        detail: root.activePowerProfile !== "" ? root.activePowerProfile : "Loading…" }
     ]
+  }
+
+  function refreshPowerProfile() {
+    if (powerProfileProcess.running) return
+    powerProfileProcess.command = [Quickshell.env("HOME") + "/.local/bin/nixos-control-state", "power"]
+    powerProfileProcess.running = true
+  }
+
+  function parsePowerProfile(raw) {
+    try {
+      var power = JSON.parse(String(raw || "{}")) || ({})
+      var active = String(power.active || "").replace(/-/g, " ")
+      if (active === "") {
+        root.activePowerProfile = power.available === false ? "Unavailable" : "Unknown"
+        return
+      }
+      root.activePowerProfile = active.charAt(0).toUpperCase() + active.slice(1)
+    } catch (e) {
+      root.activePowerProfile = "Unavailable"
+    }
   }
 
   function parseStats(raw) {
@@ -55,19 +77,27 @@ ShellRoot {
     }
   }
 
+  FileView {
+    id: statsFile
+    path: Quickshell.env("XDG_RUNTIME_DIR") + "/nixos-desktop-state.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.parseStats(text())
+    onFileChanged: reload()
+    onLoadFailed: root.stats = ({})
+  }
+
   Process {
-    id: statsProcess
-    command: ["sh", "-lc", "exec \"$HOME/.local/bin/nixos-system-stats\""]
-    running: true
-    stdout: StdioCollector { id: statsOutput }
-    onExited: root.parseStats(statsOutput.text)
+    id: powerProfileProcess
+    stdout: StdioCollector { id: powerProfileOutput }
+    onExited: root.parsePowerProfile(powerProfileOutput.text)
   }
 
   Timer {
-    interval: 2000
+    interval: 5000
     repeat: true
     running: true
-    onTriggered: if (!statsProcess.running) statsProcess.running = true
+    onTriggered: root.refreshPowerProfile()
   }
 
   PanelWindow {
@@ -160,8 +190,7 @@ ShellRoot {
               { label: "Temp", value: root.stats.temp !== undefined ? root.stats.temp + "°" : "…" },
               { label: "RAM", value: root.stats.mem ? root.stats.mem.percent + "%" : "…" },
               { label: "Swap", value: root.stats.mem ? root.stats.mem.swapPercent + "%" : "…" },
-              { label: "Storage", value: root.stats.storage !== undefined && root.stats.storage !== null ? root.stats.storage + "%" : "…" },
-              { label: "Power", value: root.stats.power !== undefined && root.stats.power !== null ? root.stats.power + "W" : "AC" }
+              { label: "Storage", value: root.stats.storage !== undefined && root.stats.storage !== null ? root.stats.storage + "%" : "…" }
             ]
             delegate: RowLayout {
               required property var modelData
@@ -169,55 +198,6 @@ ShellRoot {
               Text { text: modelData.label; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: root.textSmall }
               Item { Layout.fillWidth: true }
               Text { text: modelData.value; color: theme.foreground; font.family: theme.fontFamily; font.pixelSize: root.textBody }
-            }
-          }
-        }
-
-        Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.14) }
-
-        Text {
-          text: root.stats.power !== undefined && root.stats.power !== null ? "TOP POWER · EST." : "TOP CPU"
-          color: theme.muted
-          font.family: theme.fontFamily
-          font.pixelSize: root.textSmall
-          font.weight: Font.Medium
-          font.letterSpacing: 0.8
-        }
-
-        ColumnLayout {
-          Layout.fillWidth: true
-          spacing: 3
-          Repeater {
-            model: root.stats.topProcesses || []
-            delegate: RowLayout {
-              required property var modelData
-              Layout.fillWidth: true
-              Text {
-                text: modelData.name
-                color: theme.foreground
-                opacity: 0.82
-                font.family: theme.fontFamily
-                font.pixelSize: root.textSmall
-                elide: Text.ElideRight
-                Layout.fillWidth: true
-              }
-              Text {
-                visible: modelData.w !== undefined && modelData.w !== null
-                text: visible ? Number(modelData.w).toFixed(1) + "W" : ""
-                color: theme.foreground
-                font.family: theme.fontFamily
-                font.pixelSize: root.textSmall
-                Layout.preferredWidth: 58
-                horizontalAlignment: Text.AlignRight
-              }
-              Text {
-                text: Number(modelData.cpu || 0).toFixed(1) + "%"
-                color: theme.foreground
-                font.family: theme.fontFamily
-                font.pixelSize: root.textSmall
-                Layout.preferredWidth: 58
-                horizontalAlignment: Text.AlignRight
-              }
             }
           }
         }
@@ -308,4 +288,6 @@ ShellRoot {
       }
     }
   }
+
+  Component.onCompleted: root.refreshPowerProfile()
 }

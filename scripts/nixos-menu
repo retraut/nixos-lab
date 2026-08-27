@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if pgrep -f "^quickshell -n -p $HOME/.config/quickshell/menu.qml$" >/dev/null; then
+menu_pid="$(pgrep -f "^quickshell -n -p $HOME/.config/quickshell/menu.qml$" | head -n 1 || true)"
+if [[ -n "$menu_pid" ]]; then
+  quickshell ipc --pid "$menu_pid" call nixos-menu close >/dev/null 2>&1 || true
   exit 0
 fi
 

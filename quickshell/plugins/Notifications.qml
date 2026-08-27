@@ -93,6 +93,39 @@ Item {
     delete root.liveNotifications[uid]
   }
 
+  function focusSource(uid) {
+    var ref = root.liveNotifications[uid]
+    if (!ref) return
+
+    var source = [ref.appName, ref.desktopEntry, ref.summary, ref.body].join(" ").toLowerCase()
+    if (!source.match(/ghostty|codex/)) return
+
+    Quickshell.execDetached([
+      Quickshell.env("HOME") + "/.local/bin/nixos-desktop-daemon",
+      "focus-notification",
+      String(ref.appName || ""),
+      String(ref.desktopEntry || ""),
+      String(ref.summary || ""),
+      String(ref.body || "")
+    ])
+  }
+
+  function removeNotification(uid) {
+    var ref = root.liveNotifications[uid]
+    if (ref) {
+      try { ref.dismiss() } catch (e) {}
+    }
+
+    root.dismissPopup(uid)
+    for (var i = 0; i < historyModel.count; i++) {
+      if (historyModel.get(i).uid === uid) {
+        historyModel.remove(i)
+        break
+      }
+    }
+    root.release(uid)
+  }
+
   function invokeDefault(uid) {
     var ref = root.liveNotifications[uid]
     try {
@@ -105,7 +138,8 @@ Item {
         }
       }
     } catch (e) {}
-    dismissPopup(uid)
+    root.focusSource(uid)
+    root.removeNotification(uid)
   }
 
   function clearHistory() {
@@ -240,13 +274,45 @@ Item {
               anchors.margins: 12
               spacing: 4
 
-              Text {
+              Row {
                 width: parent.width
-                text: app
-                color: root.theme ? root.theme.accent : "#7aa2f7"
-                font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
-                font.pixelSize: 12
-                elide: Text.ElideRight
+                spacing: 8
+
+                Text {
+                  width: parent.width - dismissButton.width - parent.spacing
+                  text: app
+                  color: root.theme ? root.theme.accent : "#7aa2f7"
+                  font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
+                  font.pixelSize: 12
+                  elide: Text.ElideRight
+                }
+
+                Rectangle {
+                  id: dismissButton
+                  width: 22
+                  height: 22
+                  color: dismissMouse.containsMouse
+                    ? (root.theme ? root.theme.selected : "#24283b")
+                    : "transparent"
+                  border.width: 1
+                  border.color: root.theme ? root.theme.border : "#414868"
+
+                  Text {
+                    anchors.centerIn: parent
+                    text: "×"
+                    color: root.theme ? root.theme.muted : "#9aa5ce"
+                    font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
+                    font.pixelSize: 16
+                  }
+
+                  MouseArea {
+                    id: dismissMouse
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    hoverEnabled: true
+                    onClicked: root.removeNotification(uid)
+                  }
+                }
               }
               Text {
                 width: parent.width
@@ -333,7 +399,7 @@ Item {
             Text {
               id: clearText
               anchors.centerIn: parent
-              text: "Clear"
+              text: "Clear All"
               color: root.theme ? root.theme.foreground : "#c0caf5"
               font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
               font.pixelSize: 14
@@ -381,7 +447,7 @@ Item {
               Row {
                 width: parent.width
                 Text {
-                  width: parent.width - timeLabel.width - 12
+                  width: parent.width - timeLabel.width - dismissHistoryButton.width - 20
                   text: app
                   color: root.theme ? root.theme.accent : "#7aa2f7"
                   font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
@@ -394,6 +460,32 @@ Item {
                   color: root.theme ? root.theme.muted : "#9aa5ce"
                   font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
                   font.pixelSize: 12
+                }
+                Rectangle {
+                  id: dismissHistoryButton
+                  width: 22
+                  height: 22
+                  color: dismissHistoryMouse.containsMouse
+                    ? (root.theme ? root.theme.selected : "#24283b")
+                    : "transparent"
+                  border.width: 1
+                  border.color: root.theme ? root.theme.border : "#414868"
+
+                  Text {
+                    anchors.centerIn: parent
+                    text: "×"
+                    color: root.theme ? root.theme.muted : "#9aa5ce"
+                    font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
+                    font.pixelSize: 16
+                  }
+
+                  MouseArea {
+                    id: dismissHistoryMouse
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    hoverEnabled: true
+                    onClicked: root.removeNotification(uid)
+                  }
                 }
               }
               Text {

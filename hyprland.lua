@@ -85,6 +85,48 @@ hl.bind(mod .. " + SHIFT + CTRL + A", hl.dsp.exec_cmd("nixos-agents"), { descrip
 hl.bind(mod .. " + SHIFT + B", hl.dsp.exec_cmd("chromium"), { description = "Open browser" })
 hl.bind(mod .. " + SHIFT + F", hl.dsp.exec_cmd("nautilus --new-window"), { description = "Open files" })
 hl.bind(mod .. " + CTRL + M", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-menu"), { description = "Desktop menu" })
+
+-- With clickfinger_behavior enabled, a two-finger tap is a right click. Keep
+-- it non-consuming so applications retain their normal context menus, and
+-- open the Nix menu only when the pointer is over the wallpaper itself.
+local function cursorIsOverDesktop()
+  local cursor = hl.get_cursor_pos()
+  local activeWorkspace = hl.get_active_workspace()
+  if not cursor or not activeWorkspace then return false end
+
+  for _, window in ipairs(hl.get_windows({ mapped = true })) do
+    local at = window.at
+    local size = window.size
+    if at and size and window.workspace and window.workspace.id == activeWorkspace.id
+      and cursor.x >= at.x and cursor.x < at.x + size.x
+      and cursor.y >= at.y and cursor.y < at.y + size.y then
+      return false
+    end
+  end
+
+  -- Quickshell panels and popups are layer surfaces rather than windows.
+  -- Ignore non-interactive layers such as the wallpaper layer.
+  for _, layer in ipairs(hl.get_layers()) do
+    if layer.mapped and layer.interactivity ~= 0
+      and cursor.x >= layer.x and cursor.x < layer.x + layer.w
+      and cursor.y >= layer.y and cursor.y < layer.y + layer.h then
+      return false
+    end
+  end
+
+  return true
+end
+
+local function nixosMenuIsOpen()
+  return #hl.get_layers({ namespace = "nixos-menu" }) > 0
+end
+
+hl.bind("mouse:273", function()
+  if nixosMenuIsOpen() or cursorIsOverDesktop() then
+    hl.exec_cmd(home .. "/.local/bin/nixos-menu")
+  end
+end, { non_consuming = true, description = "Nix menu on desktop two-finger tap" })
+
 hl.bind(mod .. " + L", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-lock"), { description = "Lock session" })
 hl.bind(mod .. " + SHIFT + V", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-clipboard"), { description = "Clipboard history" })
 hl.bind(mod .. " + CTRL + SPACE", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-emoji"), { description = "Emoji picker" })
