@@ -31,7 +31,7 @@ Item {
     if (panelKind === "volume") return ({ title: "Audio", subtitle: "Output, input and streams", icon: "󰕾" })
     if (panelKind === "display") return ({ title: "Display", subtitle: "Monitors and brightness", icon: "󰍹" })
     if (panelKind === "tailscale") return ({ title: "Tailscale", subtitle: "Tailnet, peers and exit nodes", icon: "󰒍" })
-    if (panelKind === "power") return ({ title: "Power", subtitle: "Performance profile", icon: "󰌪" })
+    if (panelKind === "power") return ({ title: "Power", subtitle: "Active profile", icon: "󰌪" })
     return ({ title: "Control", subtitle: "Quick settings", icon: "◇" })
   }
 

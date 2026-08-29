@@ -1,15 +1,25 @@
 { config, pkgs, lib, labUserName, ... }:
 
 let
+  codex = pkgs.callPackage ./codex.nix { };
+  commandCode = pkgs.callPackage ./packages/command-code.nix { };
+  desktopDaemon = pkgs.rustPlatform.buildRustPackage {
+    pname = "nixos-desktop-daemon";
+    version = "0.1.0";
+    src = ./packages/nixos-desktop-daemon;
+    cargoLock.lockFile = ./packages/nixos-desktop-daemon/Cargo.lock;
+    meta.mainProgram = "nixos-desktop-daemon";
+  };
+
   # OpenAI's official Linux ChatGPT/Codex app is distributed as a Debian
   # package. NixOS is not an officially supported target, so run the package
   # in an FHS environment while keeping the installation declarative.
   chatgptUnwrapped = pkgs.stdenvNoCC.mkDerivation {
     pname = "chatgpt-official";
-    version = "26.810.52044";
+    version = "26.818.61809";
     src = pkgs.fetchurl {
       url = "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb";
-      hash = "sha256-cIoVobt24rt/DjduUUU5H6J3rTpkBXwdMlN73CobTm4=";
+      hash = "sha256-G7piptvS1Jl1xihQ2O3arWBdoZNVexlJgiJeVrGUGJE=";
     };
     nativeBuildInputs = [ pkgs.libarchive ];
     dontUnpack = true;
@@ -24,7 +34,8 @@ let
 
   chatgptRun = pkgs.writeShellScript "chatgpt-run" ''
     cd ${chatgptUnwrapped}/usr/lib/chatgpt
-    exec ${chatgptUnwrapped}/usr/lib/chatgpt/ChatGPT --force-device-scale-factor=1.5 "$@"
+    exec ${chatgptUnwrapped}/usr/lib/chatgpt/ChatGPT \
+      --ozone-platform=wayland "$@"
   '';
 
   # Debian/FHS compatibility libraries for the official ChatGPT binary.
@@ -44,6 +55,7 @@ let
     gtk3
     libdrm
     libgbm
+    libglvnd
     libnotify
     libx11
     libxcb
@@ -53,11 +65,15 @@ let
     libxfixes
     libxkbcommon
     libxrandr
+    libva
     mesa
     nspr
     nss
     pango
     systemd
+    bubblewrap
+    # Codex Security's MCP manifest launches its server via `node`.
+    nodejs
     xdg-utils
     zlib
   ];
@@ -73,18 +89,112 @@ let
     '';
   };
 
+  universalPasteHelper = pkgs.writeShellScriptBin "nixos-universal-paste" ''
+    set -euo pipefail
+
+    # App-aware paste for the physical Super+V binding.
+    window_class="$(${lib.getExe' pkgs.hyprland "hyprctl"} activewindow -j 2>/dev/null \
+      | ${lib.getExe pkgs.jq} -r '[(.class // ""), (.initialClass // "")] | join(" ")' \
+      | ${lib.getExe' pkgs.coreutils "tr"} '[:upper:]' '[:lower:]')"
+
+    send_shortcut() {
+      mods="$1"
+      key="$2"
+
+      # Match Hyprland's layout-independent Super+V implementation exactly:
+      # send a physical key down/up pair instead of a layout-dependent keysym.
+      ${lib.getExe' pkgs.hyprland "hyprctl"} eval \
+        "hl.dispatch(hl.dsp.send_key_state({ mods = \"$mods\", key = \"$key\", state = \"down\" }))" \
+        >/dev/null
+      ${lib.getExe' pkgs.coreutils "sleep"} 0.05
+      ${lib.getExe' pkgs.hyprland "hyprctl"} eval \
+        "hl.dispatch(hl.dsp.send_key_state({ mods = \"$mods\", key = \"$key\", state = \"up\" }))" \
+        >/dev/null
+    }
+
+    case "$window_class" in
+      *ghostty*|*foot*|*alacritty*|*kitty*|*wezterm*|*terminal*)
+        send_shortcut "SHIFT" "Insert"
+        ;;
+      *)
+        send_shortcut "CTRL" "code:55"
+        ;;
+    esac
+  '';
+
   chromiumScaled = pkgs.symlinkJoin {
     name = "chromium-scaled";
     paths = [ pkgs.chromium ];
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postBuild = ''
       wrapProgram "$out/bin/chromium" \
-        --add-flags "--force-device-scale-factor=1.5"
+        --add-flags "--force-device-scale-factor=1.0"
     '';
   };
 
+  # Keep the display manager password-only, but give it a proper Tokyo Night
+  # presentation. The background is copied into the immutable theme package
+  # so the greeter does not depend on a user's home directory being mounted.
+  sddmAstronaut = (pkgs.sddm-astronaut.override {
+    embeddedTheme = "astronaut";
+    themeConfig = {
+      HeaderText = "";
+      HeaderTextColor = "#a9b1d6";
+      DateTextColor = "#7aa2f7";
+      TimeTextColor = "#c0caf5";
+      Background = "Backgrounds/tokyo-night-quattro.jpg";
+      FormBackgroundColor = "#1a1b26";
+      BackgroundColor = "#13141c";
+      DimBackgroundColor = "#13141c";
+      LoginFieldBackgroundColor = "#292e42";
+      PasswordFieldBackgroundColor = "#292e42";
+      LoginFieldTextColor = "#c0caf5";
+      PasswordFieldTextColor = "#c0caf5";
+      UserIconColor = "#7aa2f7";
+      PasswordIconColor = "#7aa2f7";
+      PlaceholderTextColor = "#565f89";
+      WarningColor = "#f7768e";
+      LoginButtonTextColor = "#1a1b26";
+      LoginButtonBackgroundColor = "#7aa2f7";
+      SystemButtonsIconsColor = "#a9b1d6";
+      SessionButtonTextColor = "#a9b1d6";
+      VirtualKeyboardButtonTextColor = "#a9b1d6";
+      DropdownTextColor = "#c0caf5";
+      DropdownSelectedBackgroundColor = "#292e42";
+      DropdownBackgroundColor = "#1a1b26";
+      HighlightTextColor = "#1a1b26";
+      HighlightBackgroundColor = "#7aa2f7";
+      HighlightBorderColor = "#7aa2f7";
+      HoverUserIconColor = "#bb9af7";
+      HoverPasswordIconColor = "#bb9af7";
+      HoverSystemButtonsIconsColor = "#bb9af7";
+      HoverSessionButtonTextColor = "#bb9af7";
+      HoverVirtualKeyboardButtonTextColor = "#bb9af7";
+      PartialBlur = "true";
+      BlurMax = "12";
+      Blur = "0.55";
+      HaveFormBackground = "true";
+      FormPosition = "center";
+      VirtualKeyboardPosition = "center";
+      HideVirtualKeyboard = "true";
+      HideSystemButtons = "false";
+      UseRealName = "true";
+      ForceLastUser = "true";
+      PasswordFocus = "true";
+      HideCompletePassword = "true";
+      AllowEmptyPassword = "false";
+    };
+  }).overrideAttrs (oldAttrs: {
+    installPhase = oldAttrs.installPhase + ''
+      chmod u+w $out/share/sddm/themes/sddm-astronaut-theme/Backgrounds/
+      cp ${./assets/backgrounds/tokyo-night-quattro.jpg} \
+        $out/share/sddm/themes/sddm-astronaut-theme/Backgrounds/tokyo-night-quattro.jpg
+    '';
+  });
+
   desktopPackages = with pkgs; [
     chatgptApp
+    t3code
     chromiumScaled
     quickshell
     gtk3
@@ -92,23 +202,29 @@ let
     slack
     bitwarden-desktop
     curl
+    lsof
+    powertop
+    gitMinimal
     eza
-    gnome-calendar
-    gnome-online-accounts
+    gnome-keyring
+    thunderbird
     screenfetch
     hyprsunset
+    wlsunset
     hypridle
     hyprlock
     nautilus
     jq
-    python3
     libnotify
+    upower
     wl-clipboard
+    wtype
     cliphist
     fuzzel
     brightnessctl
     bluez
     blueman
+    python3
     networkmanagerapplet
     pavucontrol
     qrencode
@@ -121,6 +237,7 @@ let
   userServicePath = lib.makeBinPath (with pkgs; [
     bash
     coreutils
+    dbus
     findutils
     gnugrep
     jq
@@ -134,6 +251,7 @@ let
     wl-clipboard
     cliphist
     libnotify
+    upower
   ]);
   userServiceEnvironment =
     "PATH=/home/${labUserName}/.local/bin:/etc/profiles/per-user/${labUserName}/bin:/run/current-system/sw/bin:${userServicePath}";
@@ -148,14 +266,42 @@ in
     xwayland.enable = true;
   };
 
-  services.displayManager.sddm.enable = true;
-  services.displayManager.sddm.wayland.enable = true;
+  # Steam needs NixOS' module rather than only the package so its 32-bit
+  # graphics stack and runtime integration are configured correctly.
+  programs.steam = {
+    enable = true;
+    package = pkgs.steam.override {
+      # Current Steam builds occasionally ignore the environment variable
+      # after their client re-exec. Pass the equivalent startup flag as well.
+      extraArgs = "-forcedesktopscaling 1.25";
+      extraEnv.STEAM_FORCE_DESKTOPUI_SCALING = "1.25";
+    };
+  };
+
+  services.displayManager.sddm = {
+    enable = true;
+    wayland.enable = true;
+    package = pkgs.kdePackages.sddm;
+    theme = "sddm-astronaut-theme";
+    extraPackages = [
+      pkgs.kdePackages.qtmultimedia
+      pkgs.kdePackages.qtsvg
+      pkgs.qt6Packages.qtvirtualkeyboard
+    ];
+    settings = {
+      General.InputMethod = "qtvirtualkeyboard";
+      Theme.Current = "sddm-astronaut-theme";
+    };
+  };
   services.displayManager.defaultSession = "hyprland-uwsm";
 
-  security.polkit.enable = true;
+  security.polkit = {
+    enable = true;
+    enablePkexecWrapper = true;
+  };
   security.rtkit.enable = true;
 
-  services.gnome.gnome-online-accounts.enable = true;
+  services.gnome.gnome-keyring.enable = true;
   services.upower.enable = true;
 
   services.pipewire = {
@@ -173,7 +319,36 @@ in
     ];
   };
 
-  environment.systemPackages = desktopPackages;
+  programs.chromium = {
+    enable = true;
+    extensions = [
+      "nngceckbapebfimnlniiiahkandclblb;https://clients2.google.com/service/update2/crx"
+      "bgnkhhnnamicmpeenaelnjfhikgbkllg;https://clients2.google.com/service/update2/crx"
+    ];
+    extraOpts = {
+      # Allow Slack's browser sign-in callback to launch the desktop client.
+      # Without this, Chromium can block the slack:// redirect from Slack's
+      # web origins even though the XDG scheme handler is registered.
+      AutoLaunchProtocolsFromOrigins = [
+        {
+          protocol = "slack";
+          # Slack SSO may hand off from an external identity provider.
+          # Use the documented wildcard temporarily to cover that callback;
+          # narrow this to the actual provider once the flow is confirmed.
+          allowed_origins = [ "*" ];
+        }
+      ];
+      # Slack's SSO flow may use a redirect/popup before handing off to the
+      # desktop client's slack:// URL.
+      PopupsAllowedForUrls = [
+        "https://slack.com"
+        "https://app.slack.com"
+        "https://[*.]slack.com"
+      ];
+    };
+  };
+
+  environment.systemPackages = desktopPackages ++ [ sddmAstronaut ];
 
   home-manager = {
     useGlobalPkgs = true;
@@ -188,9 +363,30 @@ in
         createDirectories = true;
       };
 
+      # Keep links opened by Thunderbird and other applications in Chromium.
+      # This also prevents the ChatGPT desktop app from becoming the default
+      # XDG browser when its desktop entry is installed.
+      xdg.mimeApps = {
+        enable = true;
+        defaultApplications = {
+          "text/html" = [ "chromium-browser.desktop" ];
+          "x-scheme-handler/http" = [ "chromium-browser.desktop" ];
+          "x-scheme-handler/https" = [ "chromium-browser.desktop" ];
+          "x-scheme-handler/slack" = [ "slack.desktop" ];
+          "x-scheme-handler/bitwarden" = [ "bitwarden.desktop" ];
+          "x-scheme-handler/codex" = [ "chatgpt.desktop" ];
+        };
+        associations.added = {
+          "x-scheme-handler/slack" = [ "slack.desktop" ];
+          "x-scheme-handler/bitwarden" = [ "bitwarden.desktop" ];
+          "x-scheme-handler/codex" = [ "chatgpt.desktop" ];
+        };
+      };
+      xdg.configFile."mimeapps.list".force = true;
+
       # Desktop applications live in the system package set above. Keep only
       # user-scoped tools here so the same packages are not declared twice.
-      home.packages = [ pkgs.codex ];
+      home.packages = [ codex commandCode pkgs.nodejs ];
 
       programs.bash = {
         enable = true;
@@ -200,6 +396,7 @@ in
           ll = "eza -la";
           exa = "eza";
           lt = "eza --tree --level=2 --long --icons --git";
+          restore_my_init_nixos_configuration = "sudo nixos-rebuild switch --flake /etc/nixos#laptop";
         };
       };
 
@@ -209,12 +406,16 @@ in
           # Super+W closes the active Ghostty surface through Hyprland. Keep
           # that action immediate; Chromium gets its own Ctrl+W tab binding.
           "confirm-close-surface" = false;
+
+          # VoxType and the universal paste helper deliberately use the
+          # layout-independent Shift+Insert chord. Ghostty maps that chord to
+          # PRIMARY selection by default, so point it at the regular clipboard
+          # instead; otherwise selected text can replace the transcription.
+          keybind = "shift+insert=paste_from_clipboard";
         };
       };
 
       home.sessionVariables = {
-        XDG_CURRENT_DESKTOP = "Hyprland";
-        XDG_SESSION_DESKTOP = "Hyprland";
         XDG_SESSION_TYPE = "wayland";
         QT_QPA_PLATFORM = "wayland;xcb";
         GDK_BACKEND = "wayland,x11,*";
@@ -223,13 +424,62 @@ in
       };
 
       home.file = {
+        # Wi-Fi and Bluetooth are managed by the Quickshell control center.
+        # Override the system XDG autostart entries so their legacy tray
+        # applets stay hidden while NetworkManager, BlueZ and the advanced
+        # settings applications remain available.
+        ".config/autostart/nm-applet.desktop" = {
+          force = true;
+          text = ''
+            [Desktop Entry]
+            Type=Application
+            Name=NetworkManager Applet
+            Hidden=true
+          '';
+        };
+        ".config/autostart/blueman.desktop" = {
+          force = true;
+          text = ''
+            [Desktop Entry]
+            Type=Application
+            Name=Blueman Applet
+            Hidden=true
+          '';
+        };
+        # Handy is disabled for now because its setup was not completed.
+        # Keep this override so the stale profile autostart entry stays off;
+        # remove it when we are ready to revisit Handy.
+        ".config/autostart/Handy.desktop" = {
+          force = true;
+          text = ''
+            [Desktop Entry]
+            Type=Application
+            Name=Handy
+            Hidden=true
+          '';
+        };
+        # The old profile entry was a symlink to /usr/share/applications,
+        # which does not exist on NixOS. Keep Slack autostart declarative.
+        ".config/autostart/slack.desktop" = {
+          force = true;
+          text = ''
+            [Desktop Entry]
+            Type=Application
+            Name=Slack
+            Comment=Slack Desktop
+            Exec=slack
+            StartupNotify=true
+            Terminal=false
+            X-GNOME-Autostart-enabled=true
+          '';
+        };
         ".local/share/applications/bitwarden.desktop" = {
           force = true;
           text = ''
             [Desktop Entry]
             Categories=Utility
             Comment=Secure and free password manager for all of your devices
-            Exec=bitwarden --force-device-scale-factor=1.5 %U
+            Exec=bitwarden --force-device-scale-factor=1.0 %U
             Icon=bitwarden
             MimeType=x-scheme-handler/bitwarden
             Name=Bitwarden
@@ -244,7 +494,7 @@ in
             Type=Application
             Name=Bitwarden
             Comment=Declarative scaled Bitwarden autostart
-            Exec=bitwarden --force-device-scale-factor=1.5 --autostart
+            Exec=bitwarden --force-device-scale-factor=1.0 --autostart
             StartupNotify=false
             Terminal=false
           '';
@@ -261,6 +511,30 @@ in
           StartupNotify=true
         '';
         ".local/share/icons/hicolor/scalable/apps/x-logo.svg".source = ./assets/icons/x-logo.svg;
+        ".local/share/applications/youtube.desktop".text = ''
+          [Desktop Entry]
+          Name=YouTube
+          Comment=YouTube web app
+          Exec=chromium --app=https://www.youtube.com
+          Icon=youtube
+          Terminal=false
+          Type=Application
+          Categories=AudioVideo;Network;WebBrowser;
+          StartupNotify=true
+        '';
+        ".local/share/icons/hicolor/scalable/apps/youtube.svg".source = ./assets/icons/youtube.svg;
+        ".local/share/applications/gmail.desktop".text = ''
+          [Desktop Entry]
+          Name=Gmail
+          Comment=Gmail web app
+          Exec=chromium --app=https://mail.google.com/mail/u/0/
+          Icon=gmail
+          Terminal=false
+          Type=Application
+          Categories=Office;Network;WebBrowser;
+          StartupNotify=true
+        '';
+        ".local/share/icons/hicolor/scalable/apps/gmail.svg".source = ./assets/icons/gmail.svg;
         ".config/hypr/hyprland.lua".source = ./hyprland.lua;
         ".config/hypr/hypridle.conf".source = ./hypridle.conf;
         ".config/quickshell/shell.qml".source = ./quickshell/shell.qml;
@@ -306,8 +580,8 @@ in
           source = ./scripts/nixos-window-layout;
           executable = true;
         };
-        ".local/bin/nixos-system-stats" = {
-          source = ./scripts/nixos-system-stats;
+        ".local/bin/nixos-desktop-daemon" = {
+          source = "${desktopDaemon}/bin/nixos-desktop-daemon";
           executable = true;
         };
         ".local/bin/nixos-control-state" = {
@@ -322,12 +596,12 @@ in
           source = ./scripts/nixos-wifi-qr;
           executable = true;
         };
-        ".local/bin/nixos-agent-usage" = {
-          source = ./scripts/nixos-agent-usage;
-          executable = true;
-        };
         ".local/bin/nixos-menu" = {
           source = ./scripts/nixos-menu;
+          executable = true;
+        };
+        ".local/bin/nixos-rebuild" = {
+          source = ./scripts/nixos-rebuild;
           executable = true;
         };
         ".local/bin/nixos-background" = {
@@ -342,12 +616,20 @@ in
           source = ./scripts/nixos-brightness;
           executable = true;
         };
+        ".local/bin/nixos-kbd-brightness" = {
+          source = ./scripts/nixos-kbd-brightness;
+          executable = true;
+        };
         ".local/bin/nixos-lock" = {
           source = ./scripts/nixos-lock;
           executable = true;
         };
         ".local/bin/nixos-clipboard" = {
           source = ./scripts/nixos-clipboard;
+          executable = true;
+        };
+        ".local/bin/nixos-universal-paste" = {
+          source = "${universalPasteHelper}/bin/nixos-universal-paste";
           executable = true;
         };
         ".local/bin/nixos-emoji" = {
@@ -374,7 +656,7 @@ in
             ExecStart = "%h/.local/bin/nixos-shell";
             Restart = "on-failure";
             RestartSec = 1;
-            Environment = [ userServiceEnvironment ];
+            Environment = [ userServiceEnvironment "QS_NO_RELOAD_POPUP=1" ];
           };
           Install.WantedBy = [ "graphical-session.target" ];
         };
@@ -387,6 +669,21 @@ in
           };
           Service = {
             ExecStart = "%h/.local/bin/nixos-background";
+            Restart = "on-failure";
+            RestartSec = 1;
+            Environment = [ userServiceEnvironment ];
+          };
+          Install.WantedBy = [ "graphical-session.target" ];
+        };
+
+        nixos-desktop-daemon = {
+          Unit = {
+            Description = "NixOS desktop state and night-shift daemon";
+            PartOf = [ "graphical-session.target" ];
+            After = [ "graphical-session.target" ];
+          };
+          Service = {
+            ExecStart = "${desktopDaemon}/bin/nixos-desktop-daemon";
             Restart = "on-failure";
             RestartSec = 1;
             Environment = [ userServiceEnvironment ];

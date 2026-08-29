@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+config_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+codex_file="$config_dir/codex.nix"
+tag="${1:-$(curl -fsSL https://api.github.com/repos/openai/codex/releases/latest | jq -r .tag_name)}"
+
+[[ "$tag" == rust-v* ]] || {
+  printf 'Unexpected Codex release tag: %s\n' "$tag" >&2
+  exit 1
+}
+
+version="${tag#rust-v}"
+base_url="https://github.com/openai/codex/releases/download/${tag}"
+codex_url="$base_url/codex-x86_64-unknown-linux-musl.tar.gz"
+host_url="$base_url/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz"
+codex_hash="$(nix store prefetch-file --json "$codex_url" | jq -r .hash)"
+host_hash="$(nix store prefetch-file --json "$host_url" | jq -r .hash)"
+
+backup_file="$(mktemp)"
+tmp_file="$(mktemp)"
+trap 'rm -f "$backup_file" "$tmp_file"' EXIT
+cp "$codex_file" "$backup_file"
+cp "$codex_file" "$tmp_file"
+
+sed -i \
+  -e "s|version = \"[^\"]*\";|version = \"$version\";|" \
+  -e "s|codexHash = \"sha256-[^\"]*\";|codexHash = \"$codex_hash\";|" \
+  -e "s|hostHash = \"sha256-[^\"]*\";|hostHash = \"$host_hash\";|" \
+  "$tmp_file"
+mv "$tmp_file" "$codex_file"
+
+if ! nix build "$config_dir#nixosConfigurations.laptop.config.system.build.toplevel" --no-link; then
+  cp "$backup_file" "$codex_file"
+  printf 'Build failed; restored the previous codex.nix.\n' >&2
+  exit 1
+fi
+
+printf 'Codex %s is ready. Apply it with: sudo nixos-rebuild switch --flake %s#laptop\n' "$version" "$config_dir"

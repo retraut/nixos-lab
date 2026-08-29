@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Io
 import Quickshell.Wayland
 
 import "plugins"
@@ -10,12 +11,33 @@ import "plugins"
 ShellRoot {
   Theme { id: serviceTheme }
 
+  QtObject {
+    id: notificationStateService
+    property bool doNotDisturb: false
+  }
+
   Notifications {
     theme: serviceTheme
+    dndState: notificationStateService
   }
 
   Osd {
     theme: serviceTheme
+  }
+
+  PolkitDialog {
+    theme: serviceTheme
+  }
+
+  // Reload only Quickshell's QML tree. Do not restart the systemd unit: GUI
+  // applications launched from that unit may share its cgroup and would be
+  // terminated along with the shell.
+  IpcHandler {
+    target: "nixos-shell"
+
+    function reload(): void {
+      Quickshell.reload(true)
+    }
   }
 
   Variants {
@@ -43,6 +65,7 @@ ShellRoot {
         QuattroBar {
           anchors.fill: parent
           theme: panelTheme
+          notificationState: notificationStateService
         }
       }
     }

@@ -92,9 +92,6 @@ def tailscale(action, args):
 
 
 def power(action, args):
-    if os.geteuid() != 0:
-        return run(["pkexec", sys.executable, os.path.realpath(__file__),
-                    "power", action] + args, timeout=120)
     if action == "profile" and args:
         return run(["powerprofilesctl", "set", args[0]])
     return False, "Unsupported power action"

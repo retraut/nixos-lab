@@ -5,4 +5,9 @@ if pgrep -x hyprlock >/dev/null 2>&1; then
   exit 0
 fi
 
+# Passwords should never be entered into an unexpected Ukrainian layout.
+# Layout index 0 is US in hyprland.lua; apply it to every keyboard before the
+# lock surface takes exclusive input.
+hyprctl switchxkblayout all 0 >/dev/null
+
 exec hyprlock --config "$HOME/.config/hypr/hyprlock.conf"

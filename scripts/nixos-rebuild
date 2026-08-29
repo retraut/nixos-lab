@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+flake="$HOME/.config/nixos#laptop"
+
+clear
+printf '\033[1;36mNixOS Rebuild\033[0m\n'
+printf 'Applying %s\n\n' "$flake"
+
+if /run/wrappers/bin/pkexec /run/current-system/sw/bin/nixos-rebuild switch --flake "$flake"; then
+  result=0
+  # Do not restart nixos-shell here. The rebuild is launched from the desktop
+  # menu, and restarting this user unit tears down the live Quickshell GUI
+  # (including its child panels) while the terminal is still running.
+  printf '\n\033[1;32mDone — NixOS was rebuilt successfully.\033[0m\n'
+  printf 'The running Quickshell stays open; use the separate Restart shell menu action when ready.\n'
+else
+  result=$?
+  printf '\n\033[1;31mRebuild failed (exit code %s).\033[0m\n' "$result"
+fi
+
+printf '\nPress Enter to close this window...'
+IFS= read -r _
+exit "$result"

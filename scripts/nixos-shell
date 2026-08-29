@@ -6,4 +6,9 @@ export HYPRLAND_INSTANCE_SIGNATURE="${HYPRLAND_INSTANCE_SIGNATURE:-$(hyprctl ins
 calendar_config="$HOME/.config/quickshell/calendar.qml"
 quickshell -n -p "$calendar_config" >/tmp/nixos-calendar.log 2>&1 &
 
+# Keep the application list and icons warm; Super+Space only toggles its IPC
+# controlled overlay after this process has loaded once.
+launcher_config="$HOME/.config/quickshell/app-launcher.qml"
+quickshell -n -p "$launcher_config" >/tmp/nixos-launcher.log 2>&1 &
+
 exec quickshell -n -p "$HOME/.config/quickshell/shell.qml"

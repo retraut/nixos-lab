@@ -13,19 +13,105 @@ ShellRoot {
 
   Theme { id: theme }
 
+  readonly property int titleSize: 20
+  readonly property int bodySize: 15
+  readonly property int captionSize: 13
+
   readonly property var device: UPower.displayDevice
+  // displayDevice is an aggregate and does not carry the physical battery's
+  // Capacity/health value. Select the real laptop battery for health data.
+  readonly property var physicalBattery: {
+    var devices = UPower.devices.values
+    for (var i = 0; i < devices.length; i++) {
+      var candidate = devices[i]
+      if (candidate && candidate.isLaptopBattery && candidate.isPresent)
+        return candidate
+    }
+    return null
+  }
+  readonly property var healthDevice: physicalBattery || device
   readonly property bool present: !!device && device.isPresent
   readonly property bool discharging: present && UPower.onBattery
+  readonly property bool charging: present && device.state === UPowerDeviceState.Charging
   readonly property real fraction: present ? Math.max(0, Math.min(1, Number(device.percentage))) : 0
+  readonly property real currentEnergy: present ? Number(device.energy) : NaN
+  readonly property real energyCapacity: present ? Number(device.energyCapacity) : NaN
   readonly property string percentageText: present ? Math.round(fraction * 100) + "%" : "AC"
   readonly property string stateText: !present ? "Plugged in" : (discharging ? "On battery" : "Charging")
+  property var energySamples: []
+  readonly property int sampleWindowMs: 5 * 60 * 1000
   readonly property string batteryIcon: {
     if (!present) return "󰚥"
     var icons = ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"]
+    if (charging) {
+      var chargingIcons = ["󰂄", "󰂆", "󰂆", "󰂇", "󰂈", "󰂈", "󰂉", "󰂉", "󰂊", "󰂋", "󰂅"]
+      return chargingIcons[Math.max(0, Math.min(10, Math.round(fraction * 10)))]
+    }
     return icons[Math.max(0, Math.min(9, Math.floor(fraction * 10)))]
   }
+  readonly property real measuredRateWatts: {
+    if (energySamples.length < 2) return 0
+    var first = energySamples[0]
+    var last = energySamples[energySamples.length - 1]
+    var hours = (last.timestamp - first.timestamp) / 3600000
+    if (hours <= 0) return 0
+    return (last.energy - first.energy) / hours
+  }
+  readonly property real etaSeconds: {
+    if (!present) return -1
+
+    // UPower provides the best estimate. timeToEmpty is only populated while
+    // discharging; timeToFull is only populated while charging.
+    var upowerEta = Number(discharging ? device.timeToEmpty : device.timeToFull)
+    if (isFinite(upowerEta) && upowerEta > 0) return upowerEta
+    if (charging && fraction >= 0.999) return 0
+
+    // Some firmware/UPower combinations do not report an ETA. Fall back to
+    // the live energy rate, then to the samples collected while this panel is
+    // open, so the widget still reports an estimate instead of "—".
+    var rate = Number(device.changeRate)
+    if (!isFinite(rate) || rate === 0)
+      rate = measuredRateWatts
+
+    if (charging) {
+      var remaining = energyCapacity - currentEnergy
+      if (rate > 0 && isFinite(remaining) && remaining > 0)
+        return remaining / rate * 3600
+    } else if (discharging && rate < 0 && isFinite(currentEnergy) && currentEnergy > 0) {
+      return currentEnergy / Math.abs(rate) * 3600
+    }
+
+    return -1
+  }
+  readonly property string healthText: {
+    var battery = healthDevice
+    if (!present || !battery || !battery.ready) return "—"
+    // healthSupported is false for the aggregate display device on some
+    // UPower versions even though the physical battery reports Capacity.
+    var health = Number(battery.healthPercentage)
+    if (!isFinite(health) || health <= 0) return "—"
+    return Math.round(health) + "%"
+  }
+
+  function formatDuration(seconds) {
+    if (seconds < 0) return "—"
+    if (seconds === 0) return "Full"
+    var minutes = Math.max(1, Math.ceil(seconds / 60))
+    var hours = Math.floor(minutes / 60)
+    var rest = minutes % 60
+    return hours > 0 ? hours + "h " + rest + "m" : minutes + "m"
+  }
+
+  function recordEnergySample() {
+    if (!root.present || !isFinite(root.currentEnergy)) return
+
+    var now = Date.now()
+    var samples = root.energySamples.filter(sample => now - sample.timestamp <= root.sampleWindowMs)
+    samples.push({ timestamp: now, energy: root.currentEnergy })
+    root.energySamples = samples
+  }
+
   property string activeProfile: ""
-  property var topProcesses: []
 
   readonly property var profileRows: [
     { id: "power-saver", label: "Power saver", icon: "󰌪" },
@@ -36,27 +122,12 @@ ShellRoot {
   function refresh() {
     profileProc.running = false
     profileProc.running = true
-    topProc.running = false
-    topProc.running = true
   }
 
   function setProfile(profile) {
-    Quickshell.execDetached(["powerprofilesctl", "set", profile])
-    root.activeProfile = profile
-    Qt.callLater(root.refresh)
-  }
-
-  function parseTopProcesses(raw) {
-    var result = []
-    var lines = String(raw || "").trim().split("\n")
-    for (var i = 0; i < lines.length; i++) {
-      var parts = lines[i].trim().split(/\s+/)
-      if (parts.length < 2) continue
-      var cpu = Number(parts[parts.length - 1])
-      var name = parts.slice(0, parts.length - 1).join(" ")
-      if (isFinite(cpu) && name !== "") result.push({ name: name, cpu: cpu.toFixed(1) })
-    }
-    root.topProcesses = result
+    if (profileAction.running) return
+    profileAction.command = ["powerprofilesctl", "set", profile]
+    profileAction.running = true
   }
 
   Process {
@@ -69,10 +140,16 @@ ShellRoot {
   }
 
   Process {
-    id: topProc
-    command: ["sh", "-c", "ps -eo comm=,%cpu= --sort=-%cpu 2>/dev/null | head -5"]
+    id: profileAction
+    onExited: Qt.callLater(root.refresh)
+  }
+
+  Timer {
+    id: energyTimer
+    interval: 1000
     running: true
-    stdout: StdioCollector { onStreamFinished: root.parseTopProcesses(text) }
+    repeat: true
+    onTriggered: root.recordEnergySample()
   }
 
   Timer {
@@ -81,6 +158,10 @@ ShellRoot {
     repeat: true
     onTriggered: root.refresh()
   }
+
+  Component.onCompleted: root.recordEnergySample()
+  onChargingChanged: root.energySamples = []
+  onPresentChanged: root.energySamples = []
 
   function close() { Qt.quit() }
 
@@ -98,14 +179,14 @@ ShellRoot {
 
     Rectangle {
       id: card
-      implicitWidth: content.implicitWidth + 36
-      implicitHeight: content.implicitHeight + 36
-      width: Math.min(Math.max(426, implicitWidth), 1200)
-      height: Math.min(Math.max(556, implicitHeight), 900)
+      implicitWidth: content.implicitWidth + theme.popupPadding * 2
+      implicitHeight: content.implicitHeight + theme.popupPadding * 2
+      width: Math.min(theme.popupWidth, panel.width - theme.popupEdgeMargin * 2)
+      height: Math.min(Math.max(620, implicitHeight), panel.height - theme.popupTopMargin - theme.popupEdgeMargin)
       anchors.top: parent.top
       anchors.right: parent.right
-      anchors.topMargin: 44
-      anchors.rightMargin: 12
+      anchors.topMargin: theme.popupTopMargin
+      anchors.rightMargin: theme.popupEdgeMargin
       radius: 0
       color: theme.background
       border.width: 1
@@ -121,7 +202,7 @@ ShellRoot {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.margins: 18
+        anchors.margins: theme.popupPadding
         spacing: 10
 
         RowLayout {
@@ -130,8 +211,8 @@ ShellRoot {
           Text { text: root.batteryIcon; color: theme.foreground; font.pixelSize: 25 }
           Column {
             spacing: 1
-            Text { text: "Battery"; color: theme.foreground; font.pixelSize: theme.widgetFontSize; font.weight: Font.Medium }
-            Text { text: root.stateText.toUpperCase(); color: theme.muted; font.pixelSize: theme.widgetFontSize; font.letterSpacing: 1.1 }
+            Text { text: "Battery"; color: theme.foreground; font.pixelSize: root.titleSize; font.weight: Font.Medium }
+            Text { text: root.stateText.toUpperCase(); color: theme.muted; font.pixelSize: root.captionSize; font.letterSpacing: 1.1 }
           }
           Item { Layout.fillWidth: true }
           Text { text: root.percentageText; color: theme.foreground; font.pixelSize: 28; font.weight: Font.DemiBold }
@@ -158,40 +239,23 @@ ShellRoot {
           Repeater {
             model: [
               { label: "Battery size", value: root.present && root.device.energyCapacity !== undefined ? Math.round(root.device.energyCapacity) + " Wh" : "—" },
-              { label: "Charge cycles", value: "—" },
-              { label: root.discharging ? "Time left" : "Time to full", value: root.present ? "—" : "—" },
+              { label: "Battery health", value: root.healthText },
+              { label: root.discharging ? "Time left" : "Time to full", value: root.formatDuration(root.etaSeconds) },
               { label: "Power state", value: root.stateText }
             ]
             delegate: RowLayout {
               required property var modelData
               Layout.fillWidth: true
-              Text { text: modelData.label; color: theme.muted; font.pixelSize: theme.widgetFontSize }
+              Text { text: modelData.label; color: theme.muted; font.pixelSize: root.captionSize }
               Item { Layout.fillWidth: true }
-              Text { text: modelData.value; color: theme.foreground; font.pixelSize: theme.widgetFontSize }
+              Text { text: modelData.value; color: theme.foreground; font.pixelSize: root.bodySize }
             }
           }
         }
 
         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.16) }
 
-        ColumnLayout {
-          Layout.fillWidth: true
-          spacing: 7
-          Text { text: "TOP CPU · 5S"; color: theme.muted; font.pixelSize: theme.widgetFontSize; font.weight: Font.Medium }
-          Repeater {
-            model: root.topProcesses
-            delegate: RowLayout {
-              required property var modelData
-              Layout.fillWidth: true
-              Text { text: modelData.name; color: theme.foreground; opacity: 0.75; font.pixelSize: theme.widgetFontSize; elide: Text.ElideRight; Layout.fillWidth: true }
-              Text { text: modelData.cpu + "%"; color: theme.foreground; font.pixelSize: theme.widgetFontSize }
-            }
-          }
-        }
-
-        Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.16) }
-
-        Text { text: "POWER PROFILE"; color: theme.muted; font.pixelSize: theme.widgetFontSize; font.weight: Font.Medium }
+        Text { text: "POWER PROFILE"; color: theme.muted; font.pixelSize: root.captionSize; font.weight: Font.Medium }
 
         RowLayout {
           Layout.fillWidth: true
@@ -210,9 +274,9 @@ ShellRoot {
                 anchors.centerIn: parent
                 spacing: 2
                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.icon; color: root.activeProfile === modelData.id ? theme.accent : theme.foreground; font.pixelSize: 17 }
-                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: theme.foreground; font.pixelSize: theme.widgetFontSize }
+                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: theme.foreground; font.pixelSize: root.captionSize }
               }
-              MouseArea { anchors.fill: parent; onClicked: root.setProfile(modelData.id) }
+              MouseArea { anchors.fill: parent; enabled: !profileAction.running; onClicked: root.setProfile(modelData.id) }
             }
           }
         }

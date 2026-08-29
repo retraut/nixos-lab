@@ -58,7 +58,7 @@ Item {
         implicitHeight: 26
         radius: 0
         // Keep the active workspace marker as a dot without a filled tile.
-        color: "transparent"
+        color: workspaceMouse.containsMouse ? root.selectedColor : "transparent"
         border.width: 0
 
         Text {
@@ -70,7 +70,9 @@ Item {
         }
 
         MouseArea {
+          id: workspaceMouse
           anchors.fill: parent
+          hoverEnabled: true
           onClicked: root.focusWorkspace(modelData)
         }
       }

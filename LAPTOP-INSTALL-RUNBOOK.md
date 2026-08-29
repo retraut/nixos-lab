@@ -1,105 +1,114 @@
-# NixOS laptop install runbook — ROG Zephyrus G15 GA503QS
+# NixOS laptop installation runbook — ROG Zephyrus G15 GA503QS
 
-Це чекліст для повного чистого встановлення перевіреної VM-конфігурації на
-фізичний GA503QS. Диск VM не клонується: офіційна NixOS live-флешка запускає
-`scripts/install-laptop`, а Disko відтворює описану у Git схему диска й
-встановлює flake profile `.#laptop`.
+This checklist covers a clean installation of the VM-tested configuration on a
+physical GA503QS. It does not clone the VM disk. An official NixOS live USB runs
+`scripts/install-laptop`; Disko recreates the disk layout declared in Git and
+installs the `.#laptop` profile.
 
-## Що вже автоматизовано
+> [!CAUTION]
+> This workflow erases the complete internal NVMe drive. It supports neither
+> dual boot nor arbitrary laptop models.
 
-- офіційний `NixOS/nixos-hardware` profile `asus-zephyrus-ga503`;
-- локальний override AMD iGPU: `PCI:6:0:0` замість upstream `PCI:7:0:0`;
-- GPT і EFI System Partition 2 GiB;
-- LUKS2 на всьому основному просторі;
-- Btrfs subvolumes для `/`, `/home`, `/nix` і `/var/log`;
-- host-specific hardware scan без дублювання `fileSystems`;
-- pinned `disko-install` та `mkpasswd` із цього `flake.lock`;
-- root-only yescrypt hash початкового login/sudo password;
-- копія фактично встановленого flake у `/etc/nixos`;
-- dry-run і кілька fail-closed перевірок перед destructive-кроком.
+## What is automated
 
-Інсталяція не додає TPM unlock одразу. Спочатку диск відкривається окремою
-довгою LUKS passphrase. Secure Boot, recovery material і TPM2 + PIN — наступні
-етапи після кількох стабільних boots.
+- Official `NixOS/nixos-hardware` profile `asus-zephyrus-ga503`.
+- Local AMD iGPU override: `PCI:6:0:0` instead of upstream `PCI:7:0:0`.
+- GPT and a 2 GiB EFI System Partition.
+- LUKS2 over the full main data area.
+- Btrfs subvolumes for `/`, `/home`, `/nix`, and `/var/log`.
+- Host-specific hardware scan without duplicate `fileSystems` declarations.
+- Pinned `disko-install` and `mkpasswd` from this repository's `flake.lock`.
+- Root-only yescrypt hash for the initial login/sudo password.
+- A snapshot of the installed flake under `/etc/nixos`.
+- A dry run and several fail-closed checks before any destructive step.
 
-## Stop gates перед стиранням
+The initial installation does not enroll TPM unlock. The disk first boots with
+a separate, strong LUKS passphrase. Secure Boot, recovery material, and TPM2
+auto-unlock come only after several stable boots.
 
-Не запускати інсталятор, доки кожен пункт нижче не виконаний:
+## Stop gates before erasing the disk
 
-- [ ] Обрано саме **повне стирання внутрішнього NVMe**, не dual boot.
-- [ ] Важливі файли з поточної системи перевірено відкриваються з іншого носія.
-- [ ] Password manager, SSH/GPG keys, browser data, game saves та локальні
-      проєкти синхронізовані або експортовані.
-- [ ] Репозиторій доступний публічно за
+Do not start the installer until every item is complete:
+
+- [ ] The intended operation is a **full wipe of the internal NVMe**, not dual
+      boot.
+- [ ] Important files from the current system have been opened successfully
+      from another storage location.
+- [ ] Password-manager data, SSH/GPG keys, browser data, game saves, and local
+      projects are synchronized or exported.
+- [ ] The repository is reachable at
       `https://github.com/retraut/nixos-lab`.
-- [ ] Ноутбук підключений до живлення й мережі.
-- [ ] Secure Boot поки вимкнений.
-- [ ] Завантажено саме офіційну NixOS installer USB у UEFI mode.
-- [ ] Відомі дві **різні** сильні фрази: login/sudo password і LUKS passphrase.
+- [ ] The laptop is connected to power and a working network.
+- [ ] Secure Boot is currently disabled.
+- [ ] The official NixOS installer USB was booted in UEFI mode.
+- [ ] Two **different** strong phrases are ready: the login/sudo password and
+      the LUKS passphrase.
 
-Скрипт підтримує лише full wipe. Для dual boot потрібен окремий disk layout;
-не адаптувати destructive-команди на ходу.
+Do not adapt destructive commands interactively. A dual-boot installation needs
+a separately designed and reviewed disk layout.
 
-## Boot у live ISO
+## Boot the live ISO
 
-1. Завантажитися з NixOS USB у UEFI mode.
-2. Підключити Wi-Fi/мережу й відкрити terminal.
-3. Перевірити, що GitHub доступний:
+1. Boot the NixOS USB in UEFI mode.
+2. Connect to the network and open a terminal.
+3. Confirm that GitHub is reachable:
 
 ```sh
 git ls-remote https://github.com/retraut/nixos-lab.git HEAD
 ```
 
-4. Клонувати конфіг:
+4. Clone the configuration:
 
 ```sh
 git clone https://github.com/retraut/nixos-lab.git
 cd nixos-lab
 ```
 
-## Один інсталяційний запуск
+## Run the installer once
 
-Запустити wrapper без disk argument:
+Start the wrapper without a disk argument:
 
 ```sh
 ./scripts/install-laptop
 ```
 
-Скрипт сам:
+The script will:
 
-1. Підніме права через графічний `pkexec`; якщо Polkit недоступний у live ISO,
-   використає інтерактивний `sudo`.
-2. Відмовиться працювати не на ASUS GA503QS.
-3. Знайде non-removable whole NVMe за `/dev/disk/by-id`, відкине partitions і
-   дублікати aliases. Продовжить лише якщо фізичний кандидат рівно один.
-4. Перевірить, що auto-detected target не змонтований.
-5. Покаже model, size, serial, transport, by-id і resolved device.
-6. Створить приватний installation snapshot конфігурації та додасть актуальний
-   `hardware/laptop-configuration.nix`.
-7. Збере Disko й повний `.#laptop` у режимі `--dry-run`, не змінюючи диск.
-8. Попросить набрати точний довгий рядок `ERASE ...`.
-9. Приховано попросить login/sudo password для `retraut`.
-10. Приховано двічі попросить **окрему** LUKS passphrase.
-11. Зітре target, створить GPT + EFI + LUKS2 + Btrfs, встановить NixOS і
-    збереже встановлений snapshot у `/etc/nixos`.
+1. Elevate through graphical `pkexec`, falling back to interactive `sudo` when
+   Polkit is unavailable in the live ISO.
+2. Refuse to run on anything other than an ASUS GA503QS.
+3. Discover non-removable whole NVMe devices through `/dev/disk/by-id`, reject
+   partitions and duplicate aliases, and continue only when exactly one physical
+   candidate exists.
+4. Refuse a target that is mounted or otherwise in use.
+5. Display the model, size, serial, transport, by-id path, and resolved device.
+6. Create a private installation snapshot and generate the current
+   `hardware/laptop-configuration.nix` inside it.
+7. Build Disko and the complete `.#laptop` profile in `--dry-run` mode without
+   changing the disk.
+8. Require the exact long confirmation string `ERASE ...`.
+9. Prompt privately for the login/sudo password for `retraut`.
+10. Prompt privately twice for a **separate** LUKS passphrase.
+11. Erase the target, create GPT + EFI + LUKS2 + Btrfs, install NixOS, and save
+    the installed snapshot under `/etc/nixos`.
 
-Якщо внутрішніх NVMe два, скрипт покаже обидва й завершиться **до dry-run та
-wipe**. У такому випадку не треба імпровізувати: зберегти вивід і спроєктувати
-явний вибір окремо.
+If two internal NVMe drives exist, the script prints both and exits **before the
+dry run and wipe**. Do not improvise in that situation; save the output and
+design an explicit selection mechanism separately.
 
-Паролі не передаються в argv, Git або чат. Login password стає salted yescrypt
-hash у root-only `/etc/nixos-install-user-password-hash`; LUKS passphrase
-Disko тримає лише в пам'яті поточного процесу. Якщо будь-яка перевірка або
-точне підтвердження не проходить, wipe не починається.
+Passwords never enter argv, Git, or chat. The login password becomes a salted
+yescrypt hash in root-only `/etc/nixos-install-user-password-hash`. Disko keeps
+the LUKS passphrase only in the current process's memory. If any validation or
+exact confirmation fails, the wipe does not start.
 
-## Перший boot: тільки passphrase
+## First boot: passphrase only
 
-Після повідомлення `Install complete`:
+After `Install complete`:
 
-1. Виконати shutdown, від'єднати USB і завантажитися з internal NVMe.
-2. Ввести LUKS passphrase.
-3. Увійти як `retraut` із login password.
-4. Перевірити:
+1. Shut down, remove the USB, and boot from the internal NVMe.
+2. Enter the LUKS passphrase.
+3. Sign in as `retraut` with the login password.
+4. Run:
 
 ```sh
 systemctl --failed
@@ -110,69 +119,81 @@ findmnt / /boot /home /nix /var/log
 sudo cryptsetup luksDump /dev/disk/by-label/NIXOS_CRYPT
 ```
 
-- [ ] Root справді знаходиться всередині `cryptroot`/LUKS2.
-- [ ] `/`, `/home`, `/nix`, `/var/log` — очікувані Btrfs subvolumes.
-- [ ] `sudo` вимагає пароль; passwordless sudo лишився тільки у `hosts/vm.nix`.
-- [ ] Немає autologin.
-- [ ] Працюють Wi-Fi, Bluetooth, audio/mic, brightness і touchpad.
-- [ ] Працюють suspend/resume та keyboard layout.
-- [ ] AMD desktop rendering і NVIDIA offload перевірені окремо.
-- [ ] Перевірені battery profile, fans і thermals.
-- [ ] Виконано щонайменше два успішні cold boots із passphrase.
-- [ ] Відома робоча NixOS generation не видалена.
+- [ ] Root is inside `cryptroot`/LUKS2.
+- [ ] `/`, `/home`, `/nix`, and `/var/log` are the expected Btrfs subvolumes.
+- [ ] `sudo` requires a password; passwordless sudo remains limited to
+      `hosts/vm.nix`.
+- [ ] Autologin is disabled.
+- [ ] Wi-Fi, Bluetooth, audio/microphone, brightness, and touchpad work.
+- [ ] Suspend/resume and keyboard layouts work.
+- [ ] AMD desktop rendering and NVIDIA offload were tested separately.
+- [ ] Battery profiles, fans, and thermals were checked.
+- [ ] At least two cold boots succeeded with the passphrase.
+- [ ] A known-good NixOS generation remains available.
 
-Після першого boot source of truth є і в публічному Git, і локально в
-`/etc/nixos`. Згенерований hardware scan можна пізніше перенести назад у Git;
-UUID і hardware module list не є паролями, але перед commit усе одно слід
-переглянути diff.
+After the first boot, the source of truth exists both in public Git and locally
+under `/etc/nixos`. The generated hardware scan may later be moved back into Git.
+UUIDs and kernel module lists are not passwords, but always inspect the diff
+before committing it.
 
-## Secure Boot через Lanzaboote — окремо
+## Secure Boot with Lanzaboote — separate phase
 
-Робити тільки після стабільної системи з passphrase:
+Proceed only after the passphrase-based system is stable:
 
-- [ ] Додати й pin-нути Lanzaboote input/module.
-- [ ] Створити власні Secure Boot keys і захистити private keys.
-- [ ] Перевірити signed boot artifacts до зміни firmware settings.
-- [ ] Вирішити, чи залишати Microsoft keys для device compatibility.
-- [ ] Контрольовано enroll-нути keys у firmware й увімкнути Secure Boot.
-- [ ] Перевірити `bootctl status`, `sbctl status` і кілька boots.
+- [ ] Add and pin the Lanzaboote input/module.
+- [ ] Create personal Secure Boot keys and protect the private keys.
+- [ ] Verify signed boot artifacts before changing firmware settings.
+- [ ] Decide whether Microsoft keys must remain for device compatibility.
+- [ ] Enroll keys in firmware deliberately and enable Secure Boot.
+- [ ] Check `bootctl status`, `sbctl status`, and several boots.
 
-Не enroll-ити TPM до стабільного Secure Boot state: зміна PCR після enrollment
-інакше одразу переведе boot на fallback passphrase.
+Do not enroll TPM unlock before Secure Boot is stable. A changed PCR state after
+enrollment otherwise falls back immediately to the passphrase.
 
-## Recovery material перед TPM
+## Recovery material before TPM
 
-- [ ] Додати окремий LUKS recovery key через `systemd-cryptenroll`.
-- [ ] Зберегти recovery key у password manager і ще в одному offline-місці.
-- [ ] Зробити LUKS header backup на окремий зашифрований носій.
-- [ ] Реальним reboot перевірити, що звичайна passphrase все ще працює.
+- [ ] Add a separate LUKS recovery key with `systemd-cryptenroll`.
+- [ ] Store it in the password manager and one additional offline location.
+- [ ] Back up the LUKS header to separate encrypted storage.
+- [ ] Confirm through a real reboot that the normal passphrase still works.
 
-Recovery key і header backup є секретами. Не вставляти їх у flake, Git,
-terminal history, process arguments, логи або чат.
+The recovery key and header backup are secrets. Never put them in the flake,
+Git, shell history, process arguments, logs, or chat.
 
-## TPM2 + PIN — після recovery і Secure Boot
+## TPM2 auto-unlock — after recovery and Secure Boot
 
-Після стабільного Secure Boot:
+After Secure Boot is stable:
 
-- [ ] Увімкнути systemd initrd і TPM2 support у NixOS.
-- [ ] Вибрати PCR/signed-policy strategy для фактичного boot chain, а не
-      копіювати випадковий PCR list.
-- [ ] Enroll-нути TPM2 з PIN через `systemd-cryptenroll`.
-- [ ] Не видаляти LUKS passphrase.
-- [ ] Перевірити TPM + PIN, fallback passphrase і recovery key.
-- [ ] Перевірити boot після звичайного NixOS rebuild і firmware update plan.
+- [ ] Enable systemd initrd and TPM2 support in NixOS.
+- [ ] Choose a PCR/signed-policy strategy for the actual boot chain rather than
+      copying an arbitrary PCR list.
+- [ ] Add a TPM2 token to the LUKS2 header:
 
-Після BIOS settings change, BIOS update, Secure Boot key change, TPM clear або
-заміни motherboard TPM unlock може не спрацювати. Це очікувано: диск тоді
-відкривається passphrase/recovery key, а TPM enroll-иться заново.
+```sh
+sudo systemd-cryptenroll \
+  --tpm2-device=auto \
+  /dev/disk/by-label/NIXOS_CRYPT
+```
+
+The command asks for the current LUKS passphrase but no TPM PIN. If using a
+PCR-bound policy, add only verified PCR options for the real Secure Boot chain.
+Never pass a passphrase through shell arguments.
+
+- [ ] Keep the ordinary LUKS passphrase enrolled.
+- [ ] Test TPM auto-unlock, fallback passphrase, and recovery key.
+- [ ] Test a normal NixOS rebuild and plan for firmware updates.
+
+TPM unlock may fail after BIOS setting changes, a BIOS update, Secure Boot key
+changes, TPM clearing, or motherboard replacement. That is expected: unlock
+with the passphrase or recovery key and enroll the TPM token again.
 
 ## Definition of done
 
-- [ ] Інсталяція відтворюється однією командою з auto-detected single NVMe.
-- [ ] Root — LUKS2/Btrfs, перші boots стабільні з passphrase.
-- [ ] Login і `sudo` працюють із паролем; VM-only passwordless sudo відсутній.
-- [ ] `.#laptop` перебудовується без QEMU/autologin settings.
-- [ ] Працюють Wi-Fi, Bluetooth, audio, suspend, AMD і NVIDIA offload.
-- [ ] Немає failed system/user units і Hyprland config errors.
-- [ ] Пізніше ввімкнено перевірений Secure Boot і TPM2 + PIN.
-- [ ] Passphrase, recovery key і header backup перевірені як fallback.
+- [ ] One command reproduces the install with one auto-detected NVMe.
+- [ ] Root is LUKS2/Btrfs and the first passphrase boots are stable.
+- [ ] Login and `sudo` require a password; VM-only passwordless sudo is absent.
+- [ ] `.#laptop` rebuilds without QEMU or autologin settings.
+- [ ] Wi-Fi, Bluetooth, audio, suspend, AMD rendering, and NVIDIA offload work.
+- [ ] No system/user units fail and Hyprland reports no configuration errors.
+- [ ] Verified Secure Boot and TPM2 auto-unlock are enabled later.
+- [ ] The passphrase, recovery key, and header backup all work as fallbacks.
