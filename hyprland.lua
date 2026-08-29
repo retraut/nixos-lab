@@ -11,11 +11,20 @@ hl.config({
     shadow = { enabled = true, range = 4, render_power = 3, color = theme.shadow },
   },
   dwindle = { preserve_split = true, force_split = 2 },
+  scrolling = {
+    fullscreen_on_one_column = true,
+    column_width = 0.95,
+    focus_fit_method = 0,
+    follow_focus = true,
+    follow_min_visible = 0.35,
+    wrap_focus = true,
+    direction = "right",
+  },
   general = {
     gaps_in = 5,
     gaps_out = 10,
     border_size = 2,
-    layout = "dwindle",
+    layout = "scrolling",
     resize_on_border = false,
     allow_tearing = false,
     col = {
@@ -49,12 +58,119 @@ hl.config({
   xwayland = { force_zero_scaling = true },
 })
 
--- Switch between adjacent workspaces with a three-finger horizontal swipe.
+local function appSwitcherIpc(method)
+  hl.exec_cmd("quickshell ipc --path " .. home .. "/.config/quickshell/shell.qml call nixos-app-switcher " .. method)
+end
+
+-- Three-finger swipe up opens Mission Control. Horizontal swipes cycle apps
+-- directly, without opening the Alt+Tab overlay.
 hl.gesture({
   fingers = 3,
-  direction = "horizontal",
-  action = "workspace",
+  direction = "up",
+  action = function()
+    appSwitcherIpc("overview")
+  end,
 })
+hl.gesture({
+  fingers = 3,
+  direction = "left",
+  action = function()
+    appSwitcherIpc("nextApp")
+  end,
+})
+hl.gesture({
+  fingers = 3,
+  direction = "right",
+  action = function()
+    appSwitcherIpc("previousApp")
+  end,
+})
+
+-- Keep the desktop on one persistent workspace. The window rule also folds
+-- windows created by applications that request a different workspace back
+-- into the single desktop.
+hl.workspace_rule({ workspace = "1", persistent = true, default = true })
+hl.window_rule({
+  name = "single-desktop-workspace",
+  match = { class = ".*" },
+  workspace = "1",
+})
+
+-- Keep scrolling columns alphabetically ordered as applications are opened.
+-- The scrolling layout inserts new windows by launch order, so this small
+-- event-driven sorter moves the newly opened column beside its alphabetic
+-- neighbors without changing the layout itself.
+local webAppSortNames = {
+  ["x.com"] = "x.com",
+  ["youtube.com"] = "youtube",
+  ["mail.google.com"] = "gmail",
+}
+
+local function windowSortName(window)
+  local class = string.lower(window.initialClass or window.class or "")
+  local webHost = class:match("^chrome%-(.-)__")
+  if webHost then
+    webHost = webHost:gsub("^www%.", "")
+    return webAppSortNames[webHost] or webHost
+  end
+
+  if class:find("ghostty", 1, true) then return "ghostty" end
+  if class:find("slack", 1, true) then return "slack" end
+  if class:find("chrom", 1, true) then return "chromium" end
+  return class:gsub("[^%w]+", " ")
+end
+
+local function scheduleAlphabeticPlacement(window)
+  if not window then return end
+  local address = window.address
+
+  local function placeWindow()
+    local active = hl.get_active_window()
+    if not active or (address and active.address ~= address) then return end
+
+    local workspace = active.workspace
+    if not workspace then return end
+
+    local columns = {}
+    for _, candidate in ipairs(hl.get_windows({ mapped = true })) do
+      local at = candidate.at
+      local candidateWorkspace = candidate.workspace
+      if candidateWorkspace and candidateWorkspace.id == workspace.id
+        and candidate.floating ~= true and candidate.pinned ~= true and at then
+        table.insert(columns, candidate)
+      end
+    end
+
+    table.sort(columns, function(left, right)
+      return (left.at.x or 0) < (right.at.x or 0)
+    end)
+
+    local activeIndex = nil
+    for index, candidate in ipairs(columns) do
+      if (address and candidate.address == address) or candidate == active then
+        activeIndex = index
+        break
+      end
+    end
+    if not activeIndex then return end
+
+    local activeName = windowSortName(active)
+    local left = columns[activeIndex - 1]
+    local right = columns[activeIndex + 1]
+    if left and activeName < windowSortName(left) then
+      hl.dispatch(hl.dsp.layout("swapcol l"))
+      hl.timer(placeWindow, { timeout = 35, type = "oneshot" })
+    elseif right and activeName > windowSortName(right) then
+      hl.dispatch(hl.dsp.layout("swapcol r"))
+      hl.timer(placeWindow, { timeout = 35, type = "oneshot" })
+    end
+  end
+
+  -- Wait for the scrolling layout to place the new column before measuring it.
+  hl.timer(placeWindow, { timeout = 100, type = "oneshot" })
+end
+
+hl.on("window.open", scheduleAlphabeticPlacement)
 
 hl.monitor({ output = "Virtual-1", mode = "1920x1080@60", position = "0x0", scale = 1 })
 
@@ -72,7 +188,6 @@ hl.animation({ leaf = "global", enabled = true, speed = 10, bezier = "default" }
 hl.animation({ leaf = "windows", enabled = true, speed = 4.8, bezier = "easeOutQuint", style = "slide bottom" })
 hl.animation({ leaf = "fade", enabled = true, speed = 3, bezier = "easeInOutCubic" })
 hl.animation({ leaf = "layers", enabled = true, speed = 3.8, bezier = "easeOutQuint" })
-hl.animation({ leaf = "workspaces", enabled = false })
 
 hl.bind(mod .. " + RETURN", hl.dsp.exec_cmd("ghostty"), { description = "Open terminal" })
 hl.bind(mod .. " + SPACE", function()
@@ -158,46 +273,37 @@ hl.bind("code:156", hl.dsp.exec_cmd("voxtype record toggle"), { description = "T
 hl.bind(mod .. " + W", hl.dsp.window.close(), { description = "Close window" })
 hl.bind(mod .. " + F", hl.dsp.window.fullscreen(0), { description = "Fullscreen" })
 hl.bind(mod .. " + T", hl.dsp.window.float({ action = "toggle" }), { description = "Toggle floating" })
-hl.bind(mod .. " + LEFT", hl.dsp.focus({ direction = "left" }), { description = "Focus left" })
-hl.bind(mod .. " + RIGHT", hl.dsp.focus({ direction = "right" }), { description = "Focus right" })
+hl.bind(mod .. " + LEFT", hl.dsp.layout("focus l"), { description = "Focus previous carousel window" })
+hl.bind(mod .. " + RIGHT", hl.dsp.layout("focus r"), { description = "Focus next carousel window" })
 hl.bind(mod .. " + UP", hl.dsp.focus({ direction = "up" }), { description = "Focus up" })
 hl.bind(mod .. " + DOWN", hl.dsp.focus({ direction = "down" }), { description = "Focus down" })
 
-local function focusNextWindowAcrossWorkspaces()
-  local active = hl.get_active_window()
-  if not active then return end
-
-  local windows = {}
-  for _, window in ipairs(hl.get_windows({ mapped = true })) do
-    local workspace = window.workspace
-    if workspace and workspace.id > 0 then
-      table.insert(windows, window)
-    end
-  end
-
-  if #windows < 2 then return end
-  table.sort(windows, function(a, b)
-    if a.workspace.id ~= b.workspace.id then return a.workspace.id < b.workspace.id end
-    return a.stable_id < b.stable_id
-  end)
-
-  local nextIndex = 1
-  for index, window in ipairs(windows) do
-    if window.address == active.address then
-      nextIndex = index % #windows + 1
-      break
-    end
-  end
-  local target = windows[nextIndex]
-  hl.dispatch(hl.dsp.focus({ window = target }))
-  hl.dispatch(hl.dsp.window.bring_to_top())
+-- Alt+Tab is intentionally a direct app cycle, matching Alt+` below. The
+-- Quickshell overlay remains available for Mission Control and Command+Tab.
+-- Keep both physical modifiers available for the overlay paths.
+local shellPath = home .. "/.config/quickshell/shell.qml"
+local function appSwitcherCall(method)
+  return hl.dsp.exec_cmd("quickshell ipc --path " .. shellPath .. " call nixos-app-switcher " .. method)
 end
 
--- Match Omarchy: cycle focus, then reveal the newly active window above the
--- fullscreen surface. Duplicate bindings intentionally run in this order.
-hl.bind("ALT + TAB", hl.dsp.window.cycle_next(), { description = "Next window on current workspace" })
-hl.bind("ALT + TAB", hl.dsp.window.bring_to_top(), { description = "Reveal active window on top" })
-hl.bind(mod .. " + TAB", focusNextWindowAcrossWorkspaces, { description = "Next window across all workspaces" })
+hl.bind("ALT + TAB", appSwitcherCall("altTab"), { description = "App switcher" })
+hl.bind("ALT + SHIFT + TAB", appSwitcherCall("altShiftTab"), { description = "Previous app" })
+hl.bind("SUPER + TAB", appSwitcherCall("commandTab"), { description = "App switcher (Command)" })
+hl.bind("SUPER + SHIFT + TAB", appSwitcherCall("commandShiftTab"), { description = "Previous app (Command)" })
+hl.bind("SUPER", appSwitcherCall("commitCommand"), { release = true, description = "Commit app switcher (Command)" })
+-- Physical keycode 49 is the grave/backtick key on the standard keyboard.
+-- Using the code keeps Cmd+`/Alt+` independent from the active layout.
+hl.bind("ALT + code:49", appSwitcherCall("nextWindow"), { description = "Next window of app" })
+hl.bind("ALT + SHIFT + code:49", appSwitcherCall("previousWindow"), { description = "Previous window of app" })
+hl.bind("SUPER + code:49", appSwitcherCall("nextWindow"), { description = "Next window of app (Command)" })
+hl.bind("SUPER + SHIFT + code:49", appSwitcherCall("previousWindow"), { description = "Previous window of app (Command)" })
+
+-- Cmd+W closes the current window while preferring another window from the
+-- same app group. Chromium receives Ctrl+W from xremap instead.
+hl.bind("ALT + W", appSwitcherCall("closeCurrentWindow"), { description = "Close window" })
+
+-- Cmd+Space is the launcher on both the laptop Alt profile and Apple Command.
+hl.bind("ALT + SPACE", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-launcher"), { description = "Application launcher" })
 
 -- Universal clipboard shortcuts. Use physical keycodes for GUI apps so the
 -- injected chord still means C/V while the Ukrainian layout is active.
@@ -279,7 +385,7 @@ hl.bind(mod .. " + code:25", function()
     -- Use the physical W key so Ctrl+W remains Ctrl+W in the Ukrainian layout.
     sendShortcutOnce("CTRL", "code:25")()
   else
-    hl.dispatch(hl.dsp.window.close())
+    hl.dispatch(appSwitcherCall("closeCurrentWindow"))
   end
 end, { description = "Close browser tab / window" })
 bindPhysicalAppShortcut("code:28", activeWindowIsChromium, "CTRL", "T", "New browser tab")
@@ -318,13 +424,8 @@ hl.bind(mod .. " + code:38", function()
   end
 end, { description = "Universal select all" })
 
-for i = 1, 10 do
-  local label = i == 10 and "0" or tostring(i)
-  hl.bind(mod .. " + " .. label, hl.dsp.focus({ workspace = tostring(i) }), { description = "Workspace " .. label })
-  hl.bind(mod .. " + SHIFT + " .. label, hl.dsp.window.move({ workspace = tostring(i) }), { description = "Move window to workspace " .. label })
-end
-
 hl.on("hyprland.start", function()
   hl.exec_cmd("systemctl --user import-environment WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP XDG_SESSION_TYPE")
   hl.exec_cmd("dbus-update-activation-environment --systemd --all")
+  hl.exec_cmd("systemctl --user restart nixos-xremap.service")
 end)

@@ -25,6 +25,8 @@ ShellRoot {
     theme: serviceTheme
   }
 
+  AppSwitcher {}
+
   PolkitDialog {
     theme: serviceTheme
   }

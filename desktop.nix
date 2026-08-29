@@ -197,6 +197,7 @@ let
     t3code
     chromiumScaled
     quickshell
+    xremap.hyprland
     gtk3
     ghostty
     slack
@@ -257,6 +258,15 @@ let
     "PATH=/home/${labUserName}/.local/bin:/etc/profiles/per-user/${labUserName}/bin:/run/current-system/sw/bin:${userServicePath}";
 in
 {
+  # xremap reads physical keyboard events and emits a virtual keyboard. Keep
+  # the access declarative so the per-device profiles work without running a
+  # user service as root.
+  hardware.uinput.enable = true;
+  users.users.${labUserName}.extraGroups = [ "input" "uinput" ];
+  services.udev.extraRules = ''
+    KERNEL=="uinput", GROUP="input", TAG+="uaccess"
+  '';
+
   # The compositor/session is ours. Quickshell is the only Omarchy-adjacent
   # Local runtime piece; no Omarchy CLI or Arch-specific shell runtime
   # is imported into NixOS.
@@ -273,8 +283,8 @@ in
     package = pkgs.steam.override {
       # Current Steam builds occasionally ignore the environment variable
       # after their client re-exec. Pass the equivalent startup flag as well.
-      extraArgs = "-forcedesktopscaling 1.25";
-      extraEnv.STEAM_FORCE_DESKTOPUI_SCALING = "1.25";
+      extraArgs = "-forcedesktopscaling 1.5";
+      extraEnv.STEAM_FORCE_DESKTOPUI_SCALING = "1.5";
     };
   };
 
@@ -501,7 +511,7 @@ in
         };
         ".local/share/applications/x-com.desktop".text = ''
           [Desktop Entry]
-          Name=X
+          Name=X.com
           Comment=X.com web app
           Exec=chromium --app=https://x.com
           Icon=x-logo
@@ -538,6 +548,69 @@ in
         ".config/hypr/hyprland.lua".source = ./hyprland.lua;
         ".config/hypr/hypridle.conf".source = ./hypridle.conf;
         ".config/quickshell/shell.qml".source = ./quickshell/shell.qml;
+        ".config/quickshell/AppSwitcher.qml".source = ./quickshell/AppSwitcher.qml;
+        ".config/xremap/mac.yml".text = ''
+          # PC keyboards: Alt is our Cmd-like modifier outside terminals.
+          # Apple keyboards: the physical Command key is Linux Super/Meta.
+          # Device matching intentionally excludes Apple devices from the PC
+          # profile so their Option key remains a normal Alt/Option key.
+          keymap:
+            - name: "PC Cmd shortcuts"
+              device:
+                not: ["Apple", "Magic Keyboard"]
+              application:
+                not: [/ghostty|foot|alacritty|kitty|wezterm|terminal|org\.gnome\.Console/]
+              remap:
+                Alt-C: Ctrl-C
+                Alt-V: Ctrl-V
+                Alt-X: Ctrl-X
+                Alt-A: Ctrl-A
+                Alt-Z: Ctrl-Z
+                Alt-Shift-Z: Ctrl-Shift-Z
+                Alt-F: Ctrl-F
+                Alt-L: Ctrl-L
+                Alt-Q: Ctrl-Q
+                Alt-R: Ctrl-R
+                Alt-S: Ctrl-S
+                Alt-P: Ctrl-P
+
+            - name: "PC browser Cmd shortcuts"
+              device:
+                not: ["Apple", "Magic Keyboard"]
+              application:
+                only: [/^(chromium|chromium-browser|google-chrome|google-chrome-stable|brave-browser|microsoft-edge)(\.|$)/]
+              remap:
+                Alt-T: Ctrl-T
+                Alt-W: Ctrl-W
+
+            - name: "Apple Cmd shortcuts"
+              device:
+                only: ["Apple", "Magic Keyboard"]
+              application:
+                not: [/ghostty|foot|alacritty|kitty|wezterm|terminal|org\.gnome\.Console/]
+              remap:
+                Super-C: Ctrl-C
+                Super-V: Ctrl-V
+                Super-X: Ctrl-X
+                Super-A: Ctrl-A
+                Super-Z: Ctrl-Z
+                Super-Shift-Z: Ctrl-Shift-Z
+                Super-F: Ctrl-F
+                Super-L: Ctrl-L
+                Super-Q: Ctrl-Q
+                Super-R: Ctrl-R
+                Super-S: Ctrl-S
+                Super-P: Ctrl-P
+
+            - name: "Apple browser Cmd shortcuts"
+              device:
+                only: ["Apple", "Magic Keyboard"]
+              application:
+                only: [/^(chromium|chromium-browser|google-chrome|google-chrome-stable|brave-browser|microsoft-edge)(\.|$)/]
+              remap:
+                Super-T: Ctrl-T
+                Super-W: Ctrl-W
+        '';
         ".config/quickshell/app-launcher.qml".source = ./quickshell/app-launcher.qml;
         ".config/quickshell/control-center.qml".source = ./quickshell/control-center.qml;
         ".config/quickshell/control-panel.qml".source = ./quickshell/control-panel.qml;
@@ -714,6 +787,21 @@ in
           };
           Service = {
             ExecStart = "${pkgs.hypridle}/bin/hypridle -c %h/.config/hypr/hypridle.conf";
+            Restart = "on-failure";
+            RestartSec = 1;
+            Environment = [ userServiceEnvironment ];
+          };
+          Install.WantedBy = [ "graphical-session.target" ];
+        };
+
+        nixos-xremap = {
+          Unit = {
+            Description = "Mac-style keyboard semantics for the NixOS desktop";
+            PartOf = [ "graphical-session.target" ];
+            After = [ "graphical-session.target" ];
+          };
+          Service = {
+            ExecStart = "${pkgs.xremap.hyprland}/bin/xremap --watch=device,config %h/.config/xremap/mac.yml";
             Restart = "on-failure";
             RestartSec = 1;
             Environment = [ userServiceEnvironment ];

@@ -34,7 +34,7 @@ Item {
 
   // Keep this behind the actual widgets. Empty bar space remains a gesture
   // target regardless of which side of the clock is clicked, while menu,
-  // workspace and status widgets keep their own mouse handlers.
+  // status widgets keep their own mouse handlers.
   MouseArea {
     anchors.fill: parent
     acceptedButtons: Qt.LeftButton
@@ -73,15 +73,6 @@ Item {
       Layout.maximumHeight: root.barIconSlotHeight
       theme: root.theme
       fontSize: root.barIconSize
-      fontFamily: root.barFontFamily
-    }
-
-    Workspaces {
-      Layout.alignment: Qt.AlignVCenter
-      activeColor: root.accent
-      inactiveColor: root.muted
-      selectedColor: root.selected
-      fontSize: root.barFontSize
       fontFamily: root.barFontFamily
     }
 

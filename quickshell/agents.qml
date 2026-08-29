@@ -16,6 +16,14 @@ ShellRoot {
   readonly property int captionSize: 13
   readonly property int sectionSize: 14
   readonly property int titleSize: 20
+  property int resetTick: 0
+
+  Timer {
+    interval: 60 * 1000
+    repeat: true
+    running: true
+    onTriggered: root.resetTick++
+  }
 
   function parseUsage(raw) {
     var text = String(raw || "").trim()
@@ -47,7 +55,8 @@ ShellRoot {
     var hours = Math.floor((minutes % 1440) / 60)
     if (days > 0) return "Resets in " + days + "d " + hours + "h"
     if (hours > 0) return "Resets in " + hours + "h " + (minutes % 60) + "m"
-    return "Resets soon"
+    if (minutes > 0) return "Resets in " + minutes + "m"
+    return "Resets now"
   }
 
   function modelRows() {
@@ -167,7 +176,11 @@ ShellRoot {
               Rectangle { width: parent.width * Math.max(0, Math.min(1, Number(modelData.percent || 0))); height: parent.height; color: theme.foreground }
             }
 
-            Text { text: root.formatReset(modelData.resetsAt); color: theme.muted; font.pixelSize: root.captionSize }
+            Text {
+              text: { root.resetTick; return root.formatReset(modelData.resetsAt) }
+              color: theme.muted
+              font.pixelSize: root.captionSize
+            }
           }
         }
 

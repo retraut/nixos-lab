@@ -8,10 +8,6 @@ Item {
     anchors.rightMargin: 8
     spacing: 8
 
-    Workspaces {
-      Layout.alignment: Qt.AlignVCenter
-    }
-
     Item {
       Layout.fillWidth: true
     }
