@@ -1,238 +1,214 @@
-# NixOS Quattro / Omarchy UX Lab
+# NixOS Quattro engineering notes
 
-Це експериментальна NixOS-конфігурація для VM `nixos-lab`: модульний
-Quickshell/Hyprland desktop, який відтворює потрібний Omarchy UX, але лишається
-NixOS-native, декларативним і не залежить від Arch/Omarchy runtime або чужого flake.
+> The public overview, safety notes, and entry points are in
+> [`README.md`](./README.md). This file is the detailed implementation log.
 
-Поточний source of truth — цей каталог. Він синхронізується у VM в
-`/home/retraut/nixos-lab-config`, після чого застосовується через flake profile
-`.#nixos`. Остання перевірена VM generation — NixOS
-`26.11.20260816.e5bdc4a`; на момент останнього аудиту system і user systemd мали
-по `0` failed units.
+This is an experimental NixOS configuration developed in the `nixos-lab` VM:
+a modular Quickshell/Hyprland desktop that recreates the desired Omarchy UX
+while remaining NixOS-native, declarative, and independent of the Arch/Omarchy
+runtime or a third-party flake.
 
-Автоматизований checklist для чистого встановлення на фізичний ASUS ROG
-Zephyrus G15 GA503QS, включно з Disko, LUKS2, Secure Boot і TPM2 auto-unlock з
-login password після розшифрування,
-recovery, знаходиться в
-[`LAPTOP-INSTALL-RUNBOOK.md`](./LAPTOP-INSTALL-RUNBOOK.md).
+The repository is the source of truth. It is synchronized into the VM at
+`~/nixos-lab-config` and activated with the `.#nixos` profile. The last audited
+VM generation had no failed system or user units.
 
-## Стан на 2026-08-19
+The clean-install checklist for the physical ASUS ROG Zephyrus G15 GA503QS,
+including Disko, LUKS2, Secure Boot, recovery, and TPM2 auto-unlock, is in
+[LAPTOP-INSTALL-RUNBOOK.md](./LAPTOP-INSTALL-RUNBOOK.md).
 
-### Базова система
+## Base system
 
-- Піднята й перебудовується тестова NixOS VM через KVM/QEMU.
-- Конфігурація збирається через власний flake з профілем `nixos`.
-- Конфігурація синхронізується з VM у `/home/retraut/nixos-lab-config`.
-- Користувацьке ім'я винесене в параметр `labUserName`, тому конфіг не прив'язаний жорстко до `retraut`.
-- Власні залежності відокремлені від основного списку застосунків у `desktop.nix`.
-- Додані Ghostty, Chromium, Tailscale, Bitwarden, Codex CLI, screenfetch/exa та потрібні Nerd Fonts.
-- Додані NetworkManager/Blueman/Pavucontrol, `qrencode`, PipeWire, UPower,
-  power-profiles-daemon, Polkit і системний Tailscale service для повного Control Center.
-- Firefox і Foot прибрані; термінал — Ghostty.
+- The development target is a KVM/QEMU NixOS VM.
+- The stable VM flake profile is `nixos`; the physical laptop profile is
+  `laptop`.
+- `labUserName` keeps shared modules independent of a literal username.
+- Project-specific dependencies are separated from the main application list
+  in `desktop.nix`.
+- The desktop includes Ghostty, Chromium, Tailscale, Bitwarden, Codex CLI,
+  system utilities, and the required Nerd Fonts.
+- NetworkManager, Blueman, Pavucontrol, PipeWire, UPower,
+  power-profiles-daemon, Polkit, and the Tailscale system service support the
+  full Control Center.
 
-### Тема й типографіка
+## Theme and typography
 
-- Підключений Stylix із Tokyo Night палітрою.
-- Тема генерується в один `Theme.qml` для Quickshell.
-- Stylix-палітра також декларативно генерує `hyprlock.conf` і `fuzzel.ini`;
-  runtime theme picker навмисно відсутній.
-- Узгоджені параметри:
-  - статусбар: `20px`;
-  - іконки статусбара: `24px`;
-  - текст віджетів: `30px`;
-  - cursor: DMZ-Black;
-  - шрифт: `JetBrainsMono Nerd Font`.
-- Віджети мають гострі прямокутні рамки без rounded corners.
-- Popup-вікна більше не залежать від нестабільних початкових `panel.width/panel.height`; вони розраховують розмір від контенту зі стабільними межами.
+- Stylix provides the Tokyo Night palette.
+- The palette generates one `Theme.qml` for Quickshell and declaratively
+  produces `hyprlock.conf` and `fuzzel.ini`.
+- There is deliberately no runtime theme picker.
+- The bar is `20px`, status icons are `24px`, widget text is `30px`, the cursor
+  is DMZ-Black, and the typeface is JetBrainsMono Nerd Font.
+- Widgets use sharp rectangular borders rather than rounded corners.
+- Popup dimensions are derived from content with stable bounds instead of
+  depending on unreliable initial `panel.width` and `panel.height` values.
 
-### Shell, bar і shortcuts
+## Shell, bar, and shortcuts
 
-- Перенесений Quattro-style status bar з workspaces, clock, weather, keyboard layout, tray, battery, agents і control center.
-- Workspace можна обирати мишкою; індикатор workspace не має зайвого чорного квадрата.
-- Додані/налаштовані Super-шорткати для launcher, terminal, Chromium, copy/paste, вкладок, refresh і zoom.
-- `Super+Space` відкриває fuzzy application launcher і перемикає input language на English.
-- Для Chromium/Ghostty шорткати працюють через Hyprland незалежно від поточної US/UA розкладки.
-- Додані tray-елементи для застосунків на кшталт Steam, Bitwarden і ChatGPT.
-- Панель за замовчуванням непрозора, щоб текст і tray не губилися на яскравих шпалерах.
-- Додані `Super+N` для Notification Center (у Chromium — new browser window), `Super+Escape` для lock,
-  `Super+Shift+V` для clipboard history та `Super+Ctrl+Space` для emoji.
-- `Print`, `Super+Print` і `Shift+Print` знімають region, active window та fullscreen.
-- Media keys керують гучністю, microphone mute та brightness із власним OSD.
-- `Super+A` працює як select-all у GUI та через Ghostty-native `Ctrl+Shift+A` у terminal.
-- Application launcher пропорційно масштабується через єдиний `uiScale = 1.5`;
-  ChatGPT, Bitwarden і Chromium запускаються зі scale factor `1.5` (150%).
+The Quattro-style bar contains workspaces, clock, weather, keyboard layout,
+tray, battery, agents, notifications, and Control Center. Workspaces are mouse
+selectable, and the bar defaults to an opaque background for reliable contrast.
 
-Поточний keyboard contract:
+Hyprland owns the important Super-key behavior so it remains consistent across
+US and Ukrainian layouts. The application launcher uses one proportional
+`uiScale = 1.5`; Chromium, ChatGPT, and Bitwarden launch at the matching scale.
 
-| Комбінація | Поведінка |
-|---|---|
-| `Super+Space` | Launcher 150%; перед відкриттям примусово обирається English layout |
+| Shortcut | Behavior |
+| --- | --- |
+| `Super+Space` | Select the English layout and open the 150% launcher |
 | `Super+Enter` | Ghostty |
 | `Super+Shift+B` | Chromium |
 | `Super+Shift+F` | Nautilus |
 | `Super+Ctrl+O` | Control Center |
 | `Super+Ctrl+M` | Desktop menu |
-| `Super+N` | Notification Center; у Chromium — саме new browser window |
-| `Super+A` | Select all; у Ghostty передається native `Ctrl+Shift+A` |
-| `Super+C` / `Super+V` | Universal copy/paste, включно з Ghostty та UA layout |
-| `Super+T` / `Super+R` | New tab / refresh у Chromium |
-| `Super+W` | Close tab у Chromium, close window в інших застосунках |
-| `Super+-` / `Super+=` | Zoom Chromium або Ghostty незалежно від US/UA layout |
+| `Super+N` | Notification Center; a new window inside Chromium |
+| `Super+A` | Select all; native `Ctrl+Shift+A` inside Ghostty |
+| `Super+C` / `Super+V` | Layout-independent copy and paste |
+| `Super+T` / `Super+R` | New tab / refresh in Chromium |
+| `Super+W` | Close a Chromium tab or another application's window |
+| `Super+-` / `Super+=` | Zoom Chromium or Ghostty on either keyboard layout |
 | `Super+Shift+V` | Clipboard history |
 | `Super+Ctrl+Space` | Emoji picker |
-| `Super+Escape` | Lock session |
-| `Print` / `Super+Print` / `Shift+Print` | Region / active window / fullscreen screenshot |
-| `Super+1…0` | Workspace 1…10; з `Shift` — перенести активне вікно |
+| `Super+Escape` | Lock the session |
+| `Print` / `Super+Print` / `Shift+Print` | Region / active window / full-screen capture |
+| `Super+1…0` | Select workspace 1…10; add `Shift` to move the active window |
 
-### Bar, tray і touchpad interactions
+Media keys control volume, microphone mute, and brightness through the custom
+OSD.
 
-- Порожня ділянка bar: double click перемикає opaque/transparent background.
-- Weather: left click відкриває current/hourly view, right або middle click — weekly view.
-- Clock відкриває Calendar; keyboard indicator циклічно перемикає US/UA.
-- Tray розгортається hover-ом або кліком. Left click активує застосунок, middle click
-  викликає secondary action, right click або two-finger tap відкриває його menu.
-- Tray menu прив'язане до конкретної іконки справа, має screen-edge slide adjustment і
-  власну навігацію по submenu; це виправляє menu ChatGPT, яке раніше з'являлося зліва.
-- Дзвіночок: left click відкриває Notification Center; right click/two-finger tap
-  перемикає DND. DND state завжди показується окремим popup навіть коли звичайні toast-и muted.
-- Шестерня: left click toggle Control Center, right click explicit close. Hover сам
-  нічого не відкриває, тому немає open/close race.
+## Bar, tray, and touchpad interactions
 
-### Quickshell-віджети
+- Double-clicking empty bar space toggles an opaque or transparent background.
+- Left-clicking weather opens current/hourly conditions; right- or
+  middle-clicking opens the weekly view.
+- The clock opens Calendar, and the keyboard indicator cycles US/UA.
+- The tray expands on hover or click. Left click activates an item, middle click
+  invokes its secondary action, and right click or a two-finger tap opens its
+  menu.
+- Tray menus are anchored to the selected icon and adjust at the screen edge.
+- Left-clicking the notification bell opens Notification Center. Right click or
+  a two-finger tap toggles DND, with a dedicated state popup even while regular
+  toasts are muted.
+- Left-clicking the gear toggles Control Center; right click explicitly closes
+  it. Hover alone never changes its state.
 
-Реалізовані окремі popup-віджети:
+## Quickshell widgets
 
-- `agents.qml` — провайдери, usage і запуск доступних CLI.
-- `battery-panel.qml` — battery state, top CPU processes і power profile.
-- `control-center.qml` — компактний Omarchy-baseline dashboard із system stats, top processes та
-  Wi-Fi, Bluetooth, Audio, Display, Tailscale і Power controls.
-- `control-panel.qml` — повні stateful підпанелі: Wi-Fi scan/connect/password/disconnect/forget/QR share,
-  Bluetooth scan/pair/connect/disconnect/forget, PipeWire output/input/application streams,
-  brightness control/read-only monitor state, Tailscale peers/exit nodes і power profiles. Для розширених
-  налаштувань залишені прямі переходи в `nm-connection-editor`, Blueman і Pavucontrol.
-- `calendar.qml` — календар із перемиканням місяців.
-- `weather.qml` — поточна погода, погодинний прогноз і прогноз на 7 днів.
-- `menu.qml` — desktop menu для clipboard, emoji, screenshots, notifications і lock.
-- `app-launcher.qml` — fuzzy launcher із web app `X`.
+- `agents.qml`: available CLI providers, usage, and launch actions.
+- `battery-panel.qml`: battery state and power profile.
+- `control-center.qml`: compact dashboard with system statistics and six control
+  categories.
+- `control-panel.qml`: stateful Wi-Fi, Bluetooth, PipeWire, display, Tailscale,
+  and power detail pages, with links to native advanced tools where appropriate.
+- `calendar.qml`: navigable month view.
+- `weather.qml`: current, hourly, and seven-day forecasts.
+- `menu.qml`: clipboard, emoji, screenshot, notification, and lock actions.
+- `app-launcher.qml`: fuzzy application and web-app launcher.
 
-### Повний Control Center
+Adaptive layouts keep long descriptions, hourly columns, weekly rows, and
+launcher entries usable with large fonts.
 
-Dashboard повторює структуру поточного live Omarchy Control Center, але реалізований
-нативно для NixOS. Він має compact typography, system stats (`CPU`, `RAM`, `Swap`,
-`Storage`, temperature/power when available), top CPU processes і постійну сітку 2×3.
-Laptop controls не зникають у VM — замість цього чесно показують відсутній hardware.
+## Control Center
 
-| Панель | Реалізована поведінка |
-|---|---|
-| Wi-Fi | Adapter/radio state, scan, AP list, signal/security, connect, password prompt, disconnect, forget через right click, advanced NetworkManager settings і QR share активної мережі |
-| Bluetooth | Adapter/power state, scan, discovered/paired/connected devices, connect, disconnect, forget і перехід у Blueman |
-| Audio | PipeWire output/input volume до 150%, mute, default sink/source, application streams і Pavucontrol |
-| Display | Backlight slider лише для справжнього `backlight` device; monitor name/mode/refresh/current scale показуються read-only |
-| Tailscale | Backend/auth state, connect/disconnect, self node, peers, online state та exit-node toggle |
-| Power | Поточний і доступні profiles через power-profiles-daemon |
+The dashboard follows the Omarchy Control Center structure but is implemented
+natively for NixOS. It uses compact typography, reports CPU, RAM, swap, storage,
+and temperature, and keeps a fixed 2×3 control grid. Laptop controls remain
+visible in the VM and explicitly report missing hardware.
 
-Display навмисно safe: runtime scale picker, DPMS off та monitor enable/disable відсутні
-і в QML, і в action backend. Scale задається декларативно через `hl.monitor(...)` у
-`hyprland.lua`, тому випадковий клік у Control Center не може лишити ноутбук із чорним екраном.
+| Panel | Implemented behavior |
+| --- | --- |
+| Wi-Fi | Radio state, scan, access points, signal/security, connect, password prompt, disconnect, forget, NetworkManager settings, and QR sharing |
+| Bluetooth | Adapter power, scan, discovered/paired/connected devices, connect, disconnect, forget, and Blueman |
+| Audio | PipeWire output/input volume up to 150%, mute, defaults, application streams, and Pavucontrol |
+| Display | Backlight slider for real backlight devices; read-only monitor name, mode, refresh rate, and scale |
+| Tailscale | Backend/auth state, connect/disconnect, self node, peers, online state, and exit-node toggle |
+| Power | Current and available power-profiles-daemon profiles |
 
-Control Center розділений на read-only state provider `scripts/nixos-control-state`,
-mutation helper `scripts/nixos-control-action`, QR helper `scripts/nixos-wifi-qr`,
-dashboard `quickshell/control-center.qml` і detail UI `quickshell/control-panel.qml`.
-Це тримає QML простим, не використовує shell interpolation для зовнішніх значень і
-дозволяє окремо тестувати state та actions.
+Display controls are intentionally conservative. There is no runtime scale
+picker, DPMS-off action, or monitor enable/disable mutation in QML or the action
+backend. Scale remains declarative through `hl.monitor(...)` in `hyprland.lua`.
 
-Wi-Fi QR створюється лише після кліку для активного NetworkManager profile. PSK читається
-через `nmcli --show-secrets`, передається `qrencode` через stdin, не потрапляє в process
-arguments/state/logs, а PNG записується як `$XDG_RUNTIME_DIR/nixos-wifi-share.png` з mode
-`0600`. У VM кнопка disabled через відсутній Wi-Fi adapter; на ноутбуці вона активується
-автоматично після підключення.
+The implementation separates the read-only state provider
+`scripts/nixos-control-state`, mutation helper `scripts/nixos-control-action`,
+QR helper `scripts/nixos-wifi-qr`, dashboard UI, and detail UI. External values
+are never interpolated into shell commands.
 
-### Omarchy-style UX без runtime-мутацій
+Wi-Fi QR generation happens only on request for the active NetworkManager
+profile. The PSK is read with `nmcli --show-secrets`, passed to `qrencode` over
+stdin, omitted from argv/state/logs, and written as
+`$XDG_RUNTIME_DIR/nixos-wifi-share.png` with mode `0600`.
 
-- Quickshell тепер володіє `org.freedesktop.Notifications`: є toast-и, DND,
-  in-session history і права панель Notification Center.
-- Доданий bottom-center OSD для volume, mute, microphone та brightness.
-- `hypridle` і `hyprlock` описані декларативно: lock через 5 хвилин,
-  DPMS off через 5:30 і lock перед sleep. У disposable VM `nixos-hypridle.service`
-  після rebuild вручну зупиняється, бо тестовий user password невідомий; laptop profile
-  має запускати його штатно після налаштування реального password/fingerprint.
-- `cliphist` має окремі text/image watchers; вибір історії та emoji працює через Fuzzel.
-- Screenshot workflow використовує `grim`, `slurp`, clipboard і desktop notification.
-- Quickshell, wallpaper, layout daemon, idle manager і clipboard watchers оформлені
-  як Home Manager `systemd --user` services із restart policy.
-- UPower, rtkit і Bluetooth увімкнені системно. Laptop controls завжди залишаються
-  видимими; у VM вони явно показують, що відповідний adapter відсутній.
+## Omarchy-style UX without runtime mutation
 
-Для великих шрифтів додані adaptive layouts: довгі описи, погодинні колонки, weekly rows і launcher entries більше не обрізаються на старті.
+- Quickshell owns `org.freedesktop.Notifications` and provides toasts, DND,
+  in-session history, and a right-side Notification Center.
+- A bottom-center OSD covers volume, mute, microphone, and brightness.
+- `hypridle` and `hyprlock` are declarative: lock at five minutes, DPMS off at
+  5:30, and lock before sleep.
+- `cliphist` uses separate text and image watchers; Fuzzel handles clipboard and
+  emoji selection.
+- Screenshots use `grim`, `slurp`, the clipboard, and desktop notifications.
+- Quickshell, wallpaper, layout, idle, voice, daemon, and clipboard processes
+  are Home Manager user services with explicit restart policies.
+- UPower, rtkit, and Bluetooth are enabled system-wide.
 
-### Виправлення, зроблені під час аудиту віджетів
+## Audit fixes and safety properties
 
-- Виправлений старт Calendar і Weather: IPC повертав успішний код навіть без живого процесу, тому launcher інколи нічого не відкривав.
-- Launcher-и тепер перевіряють точний процес Quickshell, без false match по схожих командних рядках.
-- Control Center більше не стартує з невидимою карткою `60x44`.
-- Control Center використовує окрему компактну типографіку, незалежну від 150% launcher scale.
-- Controls повернуті до чистої baseline-сітки 2×3; capability filter більше не ховає laptop-функції у VM.
-- Шестерня відкриває Control Center по кліку й тим самим кліком закриває його; hover більше не
-  створює випадковий open/close race. Правий клік лишився явним close.
-- Підключений сигнал кнопки «назад» із `control-panel.qml` до закриття підпанелі.
-- Display використовує тільки справжній `backlight` device, тому keyboard LED не видається за
-  яскравість екрана. Runtime scale picker прибраний: scale задається декларативно в
-  `hyprland.lua`, а Control Center лише показує поточне значення з Hyprland.
-- Display panel не має DPMS off або monitor enable/disable actions: список моніторів навмисно
-  read-only, щоб випадковий клік не залишив ноутбук із чорним екраном.
-- Wi-Fi пароль передається action helper-у через stdin і не потрапляє в argv/process list.
-- Wi-Fi QR генерується тільки на запит для активного NetworkManager profile; QR-файл має mode
-  `0600` у `$XDG_RUNTIME_DIR`, а PSK не потрапляє в argv, JSON state або логи.
-- Power і Tailscale mutations піднімають графічний `pkexec`, придатний для Polkit/fingerprint на ноутбуці.
-- Detail pages мають єдину геометрію та stateful native controls.
-- Іконки Control Center збільшені та явно прив'язані до `JetBrainsMono Nerd Font`.
-- System stats тепер показує `N/A`, якщо power sensor відсутній, замість незрозумілого `…`.
+- Calendar and Weather launchers verify a live Quickshell process rather than
+  trusting a successful IPC exit code.
+- Exact process matching avoids false positives from similar command lines.
+- Control Center geometry no longer starts as an invisible `60x44` card.
+- Dashboard typography is independent of the launcher's 150% scale.
+- The 2×3 grid remains stable even when VM hardware capabilities are absent.
+- Gear-button open/close behavior is deterministic and has no hover race.
+- Display discovery accepts real backlight devices, not keyboard LEDs.
+- Monitor state is read-only, preventing accidental black-screen actions.
+- Wi-Fi passwords enter the action helper over stdin and never appear in the
+  process list.
+- Wi-Fi QR data is created only on demand and remains a mode-`0600` runtime file.
+- Privileged power and Tailscale actions use graphical Polkit authorization.
+- System statistics omit unstable power-draw estimates and per-process usage.
 
-### Перевірка
+## Verification history
 
-- Останній `nixos-rebuild switch --flake ...#nixos` завершився успішно.
-- QML-конфіги Agents, Battery, Control Center, Calendar, Weather, Menu і App Launcher завантажуються без fatal/error.
-- Dashboard і всі шість detail pages пройшли IPC/visual smoke-test без QML errors або обрізання.
-- Toggle-поведінка перевірена повним циклом open → IPC dismiss → closed; повторний close є безпечним no-op.
-- Volume action перевірений на поточному значенні, а privileged power action — від root до
-  `power-profiles-daemon`; destructive Wi-Fi/Bluetooth/Tailscale actions у VM навмисно не перемикались.
-- Display backend smoke-test підтвердив, що `off` і `toggle` повертають unsupported action,
-  а monitor list у QML не має clickable mutation target.
-- Wi-Fi QR helper у VM коректно повертає JSON error без adapter/active connection; кнопка,
-  disabled state і popup QML завантажуються без помилок. Реальне читання PSK/scan QR треба
-  фінально перевірити вже на laptop hardware.
-- `hyprctl configerrors` не повертає помилок.
-- System і user systemd не мають failed units. Background, shell, window-layout і обидва
-  cliphist watchers active; `nixos-hypridle.service` у VM навмисно inactive.
-- Notification toast, Notification Center, OSD, menu, emoji picker, clipboard watcher
-  і fullscreen capture пройшли smoke-тести.
-- QEMU використовує `1 socket × 6 cores × 1 thread` і `virtio-vga-gl` через
-  `/dev/dri/renderD129`; guest kernel підтверджує `+virgl +context_init`.
-- Після virgl Quickshell стартує без `MESA-EGL failed to create dri2 screen`.
+- The VM profile has completed `nixos-rebuild switch` successfully.
+- Agents, Battery, Control Center, Calendar, Weather, Menu, and App Launcher QML
+  loaded without fatal errors.
+- The dashboard and all six detail pages passed IPC and visual smoke tests.
+- Open, IPC dismiss, close, and repeated-close behavior was exercised.
+- Volume and privileged power actions were tested; destructive network actions
+  were deliberately not toggled in the VM.
+- Display `off` and `toggle` actions return unsupported, with no clickable
+  mutation target in the monitor list.
+- The Wi-Fi QR helper returns a structured error when no adapter or active
+  connection exists.
+- Notification toasts, Notification Center, OSD, menu, emoji picker, clipboard
+  watchers, and full-screen capture passed smoke tests.
+- QEMU uses virtio-vga-gl/virgl, and Quickshell starts without the previous
+  `MESA-EGL failed to create dri2 screen` failure.
 
-## Робота з QEMU VM
+## QEMU VM workflow
 
-VM доступна через forwarded SSH:
+The development VM is reachable through forwarded SSH:
 
 ```sh
 ssh -p 2222 retraut@127.0.0.1
 ```
 
-Після синхронізації source у `/home/retraut/nixos-lab-config` конфіг застосовується так:
+After synchronizing the repository:
 
 ```sh
 cd ~/nixos-lab-config
 sudo nixos-rebuild switch --flake .#nixos
 ```
 
-Важливий lab-only крок після кожного rebuild: Home Manager знову може запустити
-idle manager, тому до появи відомого VM password його треба одразу зупинити:
+Until the disposable VM has a known password, stop the rebuilt idle manager so
+it cannot lock the session:
 
 ```sh
 systemctl --user stop nixos-hypridle.service
 ```
 
-Корисні smoke-checks:
+Useful smoke checks:
 
 ```sh
 systemctl --failed
@@ -241,79 +217,61 @@ systemctl --user status nixos-shell.service
 hyprctl configerrors
 ```
 
-Control Center має IPC target `nixos-control-center` з методами `panel(kind)`,
-`dashboard()` і `dismiss()`. Launcher script підтримує `toggle`, `open` і `close`;
-точний process match не чіпає інші Quickshell instances.
+The Control Center IPC target is `nixos-control-center`, with `panel(kind)`,
+`dashboard()`, and `dismiss()` methods. The launcher supports `toggle`, `open`,
+and `close`.
 
-## Відомі обмеження VM
+The VM has no battery, backlight, Wi-Fi, or Bluetooth devices. Their controls
+remain visible as a preview of the laptop profile and report missing hardware.
 
-- У поточній QEMU VM немає `/sys/class/power_supply`, тому реальне споживання енергії недоступне. Control Center коректно показує `Power: N/A`.
-- У VM також немає battery, backlight, Wi-Fi та Bluetooth devices. Відповідні controls
-  залишаються видимими як preview майбутнього laptop profile, але показують відсутній adapter.
-- На фізичному ноутбуці, якщо kernel експортує `BAT*/power_now`, значення буде показане у ватах.
-- Реальні Wi-Fi/Bluetooth/backlight дії потребують відповідного hardware; NetworkManager,
-  BlueZ/Blueman, PipeWire, Tailscale і power-profiles-daemon вже описані декларативно.
+## Hardware layers
 
-## Hardware layers: VM і ноутбук
+- `hosts/vm.nix`: QEMU guest agent, VM hardware scan, autologin, and passwordless
+  sudo for the disposable VM only.
+- `hosts/laptop.nix`: laptop hostname, login password-hash path, GA503QS PRIME
+  override, and no QEMU/autologin/passwordless-sudo settings.
+- `hosts/laptop-disko.nix`: destructive GPT + 2 GiB EFI + LUKS2 + Btrfs layout.
+- `hardware-configuration.nix`: generated configuration for the current VM.
+- `hardware/laptop-configuration.nix`: safe placeholder replaced by the installer
+  inside its private installation snapshot.
+- `asus-zephyrus-ga503`: upstream AMD/NVIDIA and model-specific quirks.
 
-Спільний desktop описаний у `configuration.nix`, `desktop.nix`, `theme.nix` і Quickshell-файлах. Апаратні та небезпечні для реального ноутбука налаштування винесені в host-модулі:
-
-- `hosts/vm.nix` — QEMU guest agent, VM hardware scan, autologin і passwordless sudo для disposable VM.
-- `hosts/laptop.nix` — laptop hostname, login password hash path, GA503QS PRIME
-  override і жодних QEMU/autologin/passwordless-sudo settings.
-- `hosts/laptop-disko.nix` — GPT + 2 GiB EFI + LUKS2 + Btrfs layout для full wipe.
-- `hardware-configuration.nix` — поточний згенерований конфіг VM.
-- `hardware/laptop-configuration.nix` — безпечний placeholder; installer замінює
-  його актуальним hardware scan у приватному installation snapshot.
-- upstream module `asus-zephyrus-ga503` — AMD/NVIDIA та інші model-specific quirks.
-
-Профілі:
+Profiles can be activated manually by the machine owner:
 
 ```sh
 # VM
 sudo nixos-rebuild switch --flake .#nixos
 
-# laptop
+# inspected GA503QS laptop only
 sudo nixos-rebuild switch --flake .#laptop
 ```
 
-Чисте встановлення з офіційної NixOS live-флешки запускається одним wrapper-ом.
-Він сам знаходить єдиний non-removable whole NVMe й відмовляється вгадувати,
-якщо кандидатів немає або їх більше одного:
-
-```sh
-git clone https://github.com/retraut/nixos-lab.git
-cd nixos-lab
-./scripts/install-laptop
-```
-
-Wrapper перевіряє GA503QS і target, генерує hardware layer без filesystems,
-робить pinned Disko dry-run, просить точне destructive-підтвердження, окремі
-login та LUKS passwords, а потім встановлює `.#laptop`. Деталі й stop gates є
-в runbook; цей workflow призначений лише для повного стирання диска.
+The clean laptop installer is hardware-gated, auto-detects exactly one
+non-removable whole NVMe disk, creates a hardware layer without filesystems,
+performs a pinned Disko dry run, requires exact destructive confirmation, and
+collects separate login and LUKS passphrases. See the runbook before using it.
 
 ## Apple Silicon / nix-darwin skeleton
 
-Доданий окремий output `darwinConfigurations.macbook` для Apple Silicon. Він використовує `aarch64-darwin` і спільний platform-neutral шар: Nix, flakes, zsh, git, eza, jq та bash aliases.
+`darwinConfigurations.macbook` targets `aarch64-darwin` and shares only
+platform-neutral Nix, flakes, zsh, Git, eza, jq, and aliases. The separate
+[Homebrew layer](./darwin/homebrew.nix) installs Ghostty, Chromium, and Bitwarden
+without automatic upgrades. Hyprland, Quickshell, SDDM, Wayland bindings, and
+Linux systemd services are never imported into the macOS profile.
 
-Окремий [`darwin/homebrew.nix`](/home/retraut/Work/nixos-lab/darwin/homebrew.nix) layer декларативно вмикає Homebrew і додає cask-и `ghostty`, `chromium` та `bitwarden`. Auto-update/upgrade вимкнені, щоб `darwin-rebuild switch` залишався передбачуваним.
-
-Linux-only частини навмисно не імпортуються в macOS-профіль: Hyprland, Quickshell, SDDM, Wayland bindings і Linux systemd services залишаються тільки в NixOS profiles.
-
-На Apple Silicon після встановлення Nix/nix-darwin профіль запускатиметься так:
+After replacing the placeholder `macUserName`, the intended activation command
+is:
 
 ```sh
 sudo nix run nix-darwin/master#darwin-rebuild -- \
   switch --flake .#macbook
 ```
 
-`macUserName` у `flake.nix` — поки placeholder `retraut`; перед першим запуском на Mac його треба змінити на реальне ім'я macOS-користувача. Поточний `nixpkgs-unstable` не має Ghostty для `aarch64-darwin`, тому Ghostty і GUI-застосунки встановлюються через Homebrew layer.
+## Next steps
 
-## Наступні кроки
-
-- Виконати installation runbook на ноутбуці й перевірити hardware-specific
-  Wi-Fi, audio, suspend, AMD/NVIDIA PRIME та thermals.
-- Після кількох стабільних LUKS-passphrase boots окремо додати Lanzaboote,
-  recovery material і TPM2 auto-unlock.
-- За потреби додати окреме джерело power для RAPL/hwmon на фізичному ноутбуці.
-- Продовжити наближення Control Center, weather і tray до оригінального Omarchy без імпорту Arch/Omarchy update-механізмів або runtime theme picker-а.
+- Complete the physical-laptop runbook and validate Wi-Fi, audio, suspend,
+  AMD/NVIDIA PRIME, and thermals.
+- After several stable LUKS-passphrase boots, complete Lanzaboote, recovery
+  material, and TPM2 auto-unlock.
+- Continue refining Control Center, Weather, and tray behavior without importing
+  Arch/Omarchy runtime mutation or update mechanisms.

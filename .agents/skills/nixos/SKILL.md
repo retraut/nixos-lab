@@ -51,6 +51,13 @@ permission request to activation commands.
 
 Building a derivation is verification only; never switch to or boot the result. If a check needs network access, elevated permissions, or would mutate the running system, stop and ask the user to run it or explicitly provide a safe alternative.
 
+## Rebuild-triggered restarts for long-running user services
+
+- When a `systemd.user` service runs a binary built by Nix, set `Service.ExecStart` to the concrete store path (`${package}/bin/program`), not to a stable Home Manager symlink such as `%h/.local/bin/program`.
+- A stable symlink does not change the generated unit when the package is rebuilt, so systemd may keep the old long-running process alive after activation. A store path changes with the derivation and causes Home Manager to reload the changed unit and restart the service during the rebuild.
+- The symlink under `.local/bin` may still be installed for interactive/manual invocation, but it must not be the service's `ExecStart` target.
+- Keep `Restart=on-failure` (or the service-appropriate policy) for crash recovery; it does not replace the rebuild-triggered unit change.
+
 Before editing, inspect the relevant module imports and host target. Preserve the separation between VM-only settings in `hosts/vm.nix`, laptop-specific settings in `hosts/laptop.nix`, and shared modules. Be especially cautious with `hosts/laptop-disko.nix`: its disk layout is destructive and must never be executed as part of validation.
 
 In the final handoff, summarize changed files, checks and their results, any remaining warnings, and the manual activation command when relevant.

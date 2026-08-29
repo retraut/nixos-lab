@@ -15,10 +15,15 @@ BarWidget {
   readonly property var device: UPower.displayDevice
   readonly property bool present: !!device && device.isPresent
   readonly property bool discharging: present && UPower.onBattery
+  readonly property bool charging: present && device.state === UPowerDeviceState.Charging
   readonly property real fraction: present ? Math.max(0, Math.min(1, Number(device.percentage))) : 0
   readonly property string icon: {
     if (!present) return "󰚥"
     var icons = ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"]
+    if (charging) {
+      var chargingIcons = ["󰂄", "󰂆", "󰂆", "󰂇", "󰂈", "󰂈", "󰂉", "󰂉", "󰂊", "󰂋", "󰂅"]
+      return chargingIcons[Math.max(0, Math.min(10, Math.round(fraction * 10)))]
+    }
     return icons[Math.max(0, Math.min(9, Math.floor(fraction * 10)))]
   }
   visible: root.present

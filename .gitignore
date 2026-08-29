@@ -11,3 +11,17 @@ result-*
 
 # Editor/OS noise.
 .DS_Store
+
+# Local credentials and machine-only overrides. Keep encrypted, intentionally
+# versioned secret material under an explicit tool such as sops-nix or agenix
+# instead of weakening these rules.
+.env
+.env.*
+!.env.example
+secrets/
+secrets.nix
+*.key
+*.pem
+*.p12
+*.pfx
+*.kdbx

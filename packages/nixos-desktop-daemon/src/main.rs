@@ -2,9 +2,10 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io;
+use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -14,6 +15,8 @@ const CPU_SAMPLE: Duration = Duration::from_millis(80);
 const NIGHT_SHIFT_CHECK: Duration = Duration::from_secs(15 * 60);
 const USAGE_REFRESH: Duration = Duration::from_secs(15 * 60);
 const USAGE_REQUEST: &str = "nixos-desktop-usage.refresh";
+const LOW_BATTERY_PERCENT: u8 = 10;
+const NORMAL_REFRESH_RATE: f64 = 144.0;
 
 #[derive(Clone, Default)]
 struct CpuSample {
@@ -48,6 +51,141 @@ struct NightShift {
     longitude: String,
 }
 
+struct BatteryEvents {
+    child: Child,
+    receiver: Receiver<()>,
+}
+
+#[derive(Clone, Copy)]
+struct BatteryState {
+    percent: u8,
+    discharging: bool,
+}
+
+#[derive(Clone)]
+struct MonitorMode {
+    name: String,
+    width: u64,
+    height: u64,
+    refresh_rate: f64,
+    x: i64,
+    y: i64,
+    scale: f64,
+}
+
+struct BatteryAutomation {
+    active: bool,
+    notification_id: Option<u32>,
+    previous_profile: Option<String>,
+    previous_monitors: Vec<MonitorMode>,
+    last_notified_percent: Option<u8>,
+    state_path: PathBuf,
+    state_saved: bool,
+    normal_refresh_applied: bool,
+}
+
+impl BatteryAutomation {
+    fn new(runtime: &Path) -> Self {
+        let state_path = runtime.join("nixos-low-battery-state.json");
+        let saved_state = load_battery_state(&state_path);
+        let state_saved = saved_state.is_some();
+        let (previous_profile, previous_monitors, notification_id) =
+            saved_state.unwrap_or((None, Vec::new(), None));
+        Self {
+            active: false,
+            notification_id,
+            previous_profile,
+            previous_monitors,
+            last_notified_percent: None,
+            state_saved,
+            state_path,
+            normal_refresh_applied: false,
+        }
+    }
+
+    fn update(&mut self, battery: Option<BatteryState>) {
+        let Some(battery) = battery else { return; };
+        let low = battery.discharging && battery.percent <= LOW_BATTERY_PERCENT;
+
+        if low && !self.active {
+            self.enter_low_power();
+        } else if !low && (self.active || self.state_saved) {
+            self.leave_low_power();
+        } else if !low && !self.normal_refresh_applied {
+            let _ = set_normal_refresh_rate(&self.previous_monitors);
+            self.normal_refresh_applied = true;
+        }
+
+        if low
+            && (self.last_notified_percent != Some(battery.percent)
+                || self.notification_id.is_none())
+        {
+            self.update_notification(battery.percent);
+            self.last_notified_percent = Some(battery.percent);
+            self.save_state();
+        }
+    }
+
+    fn enter_low_power(&mut self) {
+        self.active = true;
+        self.normal_refresh_applied = false;
+
+        if !self.state_saved {
+            if let Some(profile) = current_power_profile() {
+                if profile != "power-saver" {
+                    self.previous_profile = Some(profile);
+                }
+            }
+
+            self.previous_monitors = current_monitors();
+            self.state_saved = true;
+            self.save_state();
+        }
+        let _ = set_power_profile("power-saver");
+
+        let _ = current_monitors().iter().any(|monitor| set_monitor_refresh_rate(monitor, 60.0));
+    }
+
+    fn leave_low_power(&mut self) {
+        let _ = set_normal_refresh_rate(&self.previous_monitors);
+        self.previous_monitors.clear();
+
+        if let Some(profile) = self.previous_profile.take() {
+            let _ = set_power_profile(&profile);
+        }
+        if let Some(notification_id) = self.notification_id.take() {
+            close_notification(notification_id);
+        }
+        let _ = fs::remove_file(&self.state_path);
+
+        self.active = false;
+        self.state_saved = false;
+        self.normal_refresh_applied = true;
+        self.last_notified_percent = None;
+    }
+
+    fn save_state(&self) {
+        save_battery_state(
+            &self.state_path,
+            self.previous_profile.as_deref(),
+            &self.previous_monitors,
+            self.notification_id,
+        );
+    }
+
+    fn update_notification(&mut self, percent: u8) {
+        let summary = format!("Low battery — {percent}%");
+        let body = format!(
+            "Power saver and 60 Hz are enabled.\nRemaining battery: {percent}%"
+        );
+        self.notification_id = send_low_battery_notification(
+            &summary,
+            &body,
+            self.notification_id,
+        );
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("focus-notification") {
@@ -60,11 +198,15 @@ fn main() {
     let mut usage = UsageCache::new();
     let mut night_shift = start_night_shift();
     let mut next_night_shift_check = Instant::now();
+    let mut battery_automation = BatteryAutomation::new(&runtime);
+    let mut battery_events = start_battery_events();
 
     loop {
         if usage.needs_refresh(&runtime) {
             usage.refresh();
         }
+
+        battery_automation.update(read_battery());
 
         let previous = cpu_sample();
         thread::sleep(CPU_SAMPLE);
@@ -92,7 +234,7 @@ fn main() {
         } else {
             INTERVAL
         };
-        thread::sleep(interval);
+        wait_for_battery_event(&mut battery_events, interval);
     }
 }
 
@@ -121,13 +263,49 @@ fn focus_notification(source_args: &[String]) {
                 return None;
             }
 
-            let rank = if source_is_codex && window_text.contains("codex") { 0 } else { 1 };
-            Some((if source_is_codex { rank } else { 0 }, address.to_string()))
+            // Notifications do not carry a stable Wayland window address.
+            // Prefer a matching title when one is present, then choose the
+            // most recently focused *unfocused* Ghostty. This maps the common
+            // case where a job finishes in the terminal we just left while
+            // another Ghostty window is currently active.
+            let summary = source_args
+                .get(2)
+                .map(|value| value.to_lowercase())
+                .unwrap_or_default();
+            let body = source_args
+                .get(3)
+                .map(|value| value.to_lowercase())
+                .unwrap_or_default();
+            let title_match = (!summary.is_empty() && window_text.contains(&summary))
+                || (!body.is_empty() && window_text.contains(&body));
+            let focused = client
+                .get("focused")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let focus_history = client
+                .get("focusHistoryID")
+                .and_then(Value::as_u64)
+                .unwrap_or(u64::MAX);
+            let codex_match = source_is_codex && window_text.contains("codex");
+            Some((
+                if title_match { 0 } else { 1 },
+                if source_is_codex && codex_match { 0 } else { 1 },
+                if focused { 1 } else { 0 },
+                focus_history,
+                address.to_string(),
+            ))
         })
         .collect::<Vec<_>>();
-    candidates.sort_by_key(|(rank, _)| *rank);
+    candidates.sort_by_key(|candidate| {
+        (
+            candidate.0,
+            candidate.1,
+            candidate.2,
+            candidate.3,
+        )
+    });
 
-    let Some((_, address)) = candidates.into_iter().next() else { return; };
+    let Some((_, _, _, _, address)) = candidates.into_iter().next() else { return; };
     // Hyprland's Lua config expects the Lua dispatcher form first. Keep the
     // legacy dispatcher as a fallback for older Hyprland releases.
     let lua_dispatch = format!(
@@ -298,6 +476,235 @@ fn capabilities_json() -> String {
 fn command_exists(command: &str) -> bool {
     let path = std::env::var_os("PATH").unwrap_or_default();
     std::env::split_paths(&path).any(|directory| directory.join(command).is_file())
+}
+
+fn read_battery() -> Option<BatteryState> {
+    let entries = fs::read_dir("/sys/class/power_supply").ok()?;
+    let battery = entries.flatten().find(|entry| {
+        entry.file_name().to_string_lossy().starts_with("BAT")
+    })?;
+    let percent = fs::read_to_string(battery.path().join("capacity"))
+        .ok()?
+        .trim()
+        .parse::<u8>()
+        .ok()?;
+    let status = fs::read_to_string(battery.path().join("status")).unwrap_or_default();
+
+    Some(BatteryState {
+        percent,
+        discharging: status.trim().eq_ignore_ascii_case("discharging"),
+    })
+}
+
+fn current_power_profile() -> Option<String> {
+    let output = Command::new("powerprofilesctl").arg("get").output().ok()?;
+    if !output.status.success() { return None; }
+    let profile = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    (!profile.is_empty()).then_some(profile)
+}
+
+fn set_power_profile(profile: &str) -> bool {
+    Command::new("powerprofilesctl")
+        .args(["set", profile])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn current_monitors() -> Vec<MonitorMode> {
+    let Ok(output) = Command::new("hyprctl").args(["monitors", "all", "-j"]).output() else {
+        return Vec::new();
+    };
+    let Ok(monitors) = serde_json::from_slice::<Value>(&output.stdout) else {
+        return Vec::new();
+    };
+    let Some(monitors) = monitors.as_array() else { return Vec::new(); };
+
+    monitors.iter().filter_map(|monitor| {
+        Some(MonitorMode {
+            name: monitor.get("name")?.as_str()?.to_string(),
+            width: monitor.get("width")?.as_u64()?,
+            height: monitor.get("height")?.as_u64()?,
+            refresh_rate: monitor.get("refreshRate")?.as_f64()?,
+            x: monitor.get("x")?.as_i64()?,
+            y: monitor.get("y")?.as_i64()?,
+            scale: monitor.get("scale")?.as_f64()?,
+        })
+    }).collect()
+}
+
+fn set_normal_refresh_rate(fallback: &[MonitorMode]) -> bool {
+    let monitors = current_monitors();
+    let mut changed = false;
+    for monitor in &monitors {
+        changed |= set_monitor_refresh_rate(monitor, NORMAL_REFRESH_RATE);
+    }
+    if !changed {
+        for monitor in fallback {
+            changed |= set_monitor_mode(monitor);
+        }
+    }
+    changed
+}
+
+fn set_monitor_refresh_rate(monitor: &MonitorMode, refresh_rate: f64) -> bool {
+    let mode = format!(
+        "{},{}x{}@{refresh_rate:.3},{}x{},{}",
+        monitor.name, monitor.width, monitor.height, monitor.x, monitor.y, monitor.scale
+    );
+    Command::new("hyprctl")
+        .args(["keyword", "monitor", &mode])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn set_monitor_mode(monitor: &MonitorMode) -> bool {
+    let mode = format!(
+        "{},{}x{}@{:.3},{}x{},{}",
+        monitor.name,
+        monitor.width,
+        monitor.height,
+        monitor.refresh_rate,
+        monitor.x,
+        monitor.y,
+        monitor.scale
+    );
+    Command::new("hyprctl")
+        .args(["keyword", "monitor", &mode])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn load_battery_state(path: &Path) -> Option<(Option<String>, Vec<MonitorMode>, Option<u32>)> {
+    let value = serde_json::from_str::<Value>(&fs::read_to_string(path).ok()?).ok()?;
+    let profile = value
+        .get("previousProfile")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let notification_id = value
+        .get("notificationId")
+        .and_then(Value::as_u64)
+        .and_then(|id| u32::try_from(id).ok());
+    let monitors = value
+        .get("monitors")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|monitor| {
+            Some(MonitorMode {
+                name: monitor.get("name")?.as_str()?.to_string(),
+                width: monitor.get("width")?.as_u64()?,
+                height: monitor.get("height")?.as_u64()?,
+                refresh_rate: monitor.get("refreshRate")?.as_f64()?,
+                x: monitor.get("x")?.as_i64()?,
+                y: monitor.get("y")?.as_i64()?,
+                scale: monitor.get("scale")?.as_f64()?,
+            })
+        })
+        .collect();
+    Some((profile, monitors, notification_id))
+}
+
+fn save_battery_state(
+    path: &Path,
+    previous_profile: Option<&str>,
+    monitors: &[MonitorMode],
+    notification_id: Option<u32>,
+) {
+    let value = json!({
+        "previousProfile": previous_profile,
+        "notificationId": notification_id,
+        "monitors": monitors.iter().map(|monitor| json!({
+            "name": monitor.name,
+            "width": monitor.width,
+            "height": monitor.height,
+            "refreshRate": monitor.refresh_rate,
+            "x": monitor.x,
+            "y": monitor.y,
+            "scale": monitor.scale,
+        })).collect::<Vec<_>>(),
+    });
+    if let Ok(contents) = serde_json::to_vec(&value) {
+        let _ = atomic_write(path, &contents);
+    }
+}
+
+fn send_low_battery_notification(
+    summary: &str,
+    body: &str,
+    replace_id: Option<u32>,
+) -> Option<u32> {
+    let mut command = Command::new("notify-send");
+    command.args([
+        "--app-name", "NixOS Battery",
+        "--urgency", "critical",
+        "--expire-time", "0",
+        "--print-id",
+        "--hint", "boolean:resident:true",
+    ]);
+    if let Some(id) = replace_id {
+        command.args(["--replace-id", &id.to_string()]);
+    }
+    command.args([summary, body]);
+
+    let output = command.output().ok()?;
+    if !output.status.success() { return None; }
+    String::from_utf8(output.stdout).ok()?.trim().parse().ok()
+}
+
+fn close_notification(notification_id: u32) {
+    let _ = Command::new("dbus-send")
+        .args([
+            "--session",
+            "--dest=org.freedesktop.Notifications",
+            "--type=method_call",
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications.CloseNotification",
+            &format!("uint32:{notification_id}"),
+        ])
+        .status();
+}
+
+fn start_battery_events() -> Option<BatteryEvents> {
+    let mut child = Command::new("upower")
+        .arg("--monitor-detail")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let stdout = child.stdout.take()?;
+    let (sender, receiver) = mpsc::channel();
+
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if line.is_err() || sender.send(()).is_err() { break; }
+        }
+    });
+
+    Some(BatteryEvents { child, receiver })
+}
+
+fn wait_for_battery_event(events: &mut Option<BatteryEvents>, timeout: Duration) {
+    let Some(event_state) = events.as_mut() else {
+        thread::sleep(timeout);
+        return;
+    };
+
+    match event_state.receiver.recv_timeout(timeout) {
+        Ok(()) => {
+            while event_state.receiver.try_recv().is_ok() {}
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = event_state.child.kill();
+            let _ = event_state.child.wait();
+            *events = None;
+            thread::sleep(timeout);
+        }
+    }
 }
 
 fn empty_usage() -> Value {

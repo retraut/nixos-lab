@@ -4,21 +4,27 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 
-// NixOS-native port of the live Omarchy Agents dashboard. The collector is
-// Python and emits one stable JSON record; this file only renders it.
+// NixOS-native port of the live Omarchy Agents dashboard. The desktop daemon
+// owns collection and emits one stable state record; this file only renders it.
 ShellRoot {
   id: root
 
   Theme { id: theme }
   property var usage: ({})
+  property bool loading: true
   readonly property int bodySize: 16
   readonly property int captionSize: 13
   readonly property int sectionSize: 14
   readonly property int titleSize: 20
 
   function parseUsage(raw) {
-    try { root.usage = JSON.parse(String(raw || "").trim()) || ({}) }
-    catch (e) { root.usage = ({}) }
+    var text = String(raw || "").trim()
+    if (!text) return
+    try {
+      var state = JSON.parse(text) || ({})
+      root.usage = state.usage || ({})
+      root.loading = false
+    } catch (e) {}
   }
 
   function formatTokens(value) {
@@ -59,22 +65,20 @@ ShellRoot {
     return rows.slice(0, 4)
   }
 
-  Process {
-    id: usageProcess
-    command: ["sh", "-lc", "exec \"$HOME/.local/bin/nixos-agent-usage\""]
-    running: true
-    stdout: StdioCollector { id: usageOutput }
-    onExited: root.parseUsage(usageOutput.text)
+  FileView {
+    id: stateFile
+    path: Quickshell.env("XDG_RUNTIME_DIR") + "/nixos-desktop-state.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.parseUsage(text())
+    onFileChanged: reload()
+    onLoadFailed: root.loading = true
   }
 
-  Timer {
-    interval: 900000
-    repeat: true
+  Process {
+    id: usageRefreshRequest
+    command: ["sh", "-lc", "touch \"${XDG_RUNTIME_DIR:-/tmp}/nixos-desktop-usage.refresh\""]
     running: true
-    onTriggered: {
-      usageProcess.running = false
-      usageProcess.running = true
-    }
   }
 
   PanelWindow {
@@ -212,7 +216,7 @@ ShellRoot {
         Text {
           visible: !root.usage.ready
           Layout.fillWidth: true
-          text: root.usage.usageStatusText || "No Codex usage data found"
+          text: root.loading ? "Loading usage…" : (root.usage.usageStatusText || "No Codex usage data found")
           color: theme.muted
           font.pixelSize: root.bodySize
           horizontalAlignment: Text.AlignHCenter

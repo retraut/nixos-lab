@@ -37,6 +37,7 @@
       commonModules = [
         ./configuration.nix
         ./desktop.nix
+        ./voxtype.nix
         stylix.nixosModules.stylix
         ./theme.nix
         ./lockscreen.nix

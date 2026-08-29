@@ -492,20 +492,26 @@ index bd25f9c..b042224 100644
          targetSizeX = placeholder.asset->m_vSize.x + size->goal().y;
 
      targetSizeX = std::max(targetSizeX, configSize.x);
-@@ -438,16 +527,23 @@ void CPasswordInputField::updateColors() {
+@@ -438,16 +527,26 @@ void CPasswordInputField::updateColors() {
      else if (NUMLOCK && !colorConfig.num->m_bIsFallback)
          targetGrad = colorConfig.num;
 
 +    const auto FAILSOURCE = g_pAuth->getCurrentFailSource();
 +    const bool SHOWFAILURE = displayFail && ((fingerprintMode && FAILSOURCE == AUTH_IMPL_FINGERPRINT) || (!fingerprintMode && FAILSOURCE == AUTH_IMPL_PAM));
 +
-     if (checkWaiting)
-         targetGrad = colorConfig.check;
+-    if (checkWaiting)
+-        targetGrad = colorConfig.check;
 -    else if (displayFail && passwordLength == 0)
+-        targetGrad = colorConfig.fail;
++    // A rejected empty submission is a terminal auth result, even though PAM
++    // may still report that it is waiting while the failure is being painted.
++    // Keep the failed state ahead of the transient green check state.
++    if (SHOWFAILURE && passwordLength == 0)
++        targetGrad = colorConfig.fail;
++    else if (checkWaiting)
++        targetGrad = colorConfig.check;
 +    else if (displaySuccess)
 +        targetGrad = colorConfig.success;
-+    else if (SHOWFAILURE && passwordLength == 0)
-         targetGrad = colorConfig.fail;
 
 -    CGradientValueData* outerTarget = colorConfig.outer;
 +    CGradientValueData* outerTarget = displaySuccess ? colorConfig.success : (SHOWFAILURE ? colorConfig.fail : colorConfig.outer);

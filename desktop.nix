@@ -206,10 +206,8 @@ let
     powertop
     gitMinimal
     eza
-    gnome-calendar
-    gnome-control-center
-    gnome-online-accounts
-    voxtype-vulkan
+    gnome-keyring
+    thunderbird
     screenfetch
     hyprsunset
     wlsunset
@@ -218,6 +216,7 @@ let
     nautilus
     jq
     libnotify
+    upower
     wl-clipboard
     wtype
     cliphist
@@ -238,6 +237,7 @@ let
   userServicePath = lib.makeBinPath (with pkgs; [
     bash
     coreutils
+    dbus
     findutils
     gnugrep
     jq
@@ -251,6 +251,7 @@ let
     wl-clipboard
     cliphist
     libnotify
+    upower
   ]);
   userServiceEnvironment =
     "PATH=/home/${labUserName}/.local/bin:/etc/profiles/per-user/${labUserName}/bin:/run/current-system/sw/bin:${userServicePath}";
@@ -300,7 +301,7 @@ in
   };
   security.rtkit.enable = true;
 
-  services.gnome.gnome-online-accounts.enable = true;
+  services.gnome.gnome-keyring.enable = true;
   services.upower.enable = true;
 
   services.pipewire = {
@@ -324,6 +325,27 @@ in
       "nngceckbapebfimnlniiiahkandclblb;https://clients2.google.com/service/update2/crx"
       "bgnkhhnnamicmpeenaelnjfhikgbkllg;https://clients2.google.com/service/update2/crx"
     ];
+    extraOpts = {
+      # Allow Slack's browser sign-in callback to launch the desktop client.
+      # Without this, Chromium can block the slack:// redirect from Slack's
+      # web origins even though the XDG scheme handler is registered.
+      AutoLaunchProtocolsFromOrigins = [
+        {
+          protocol = "slack";
+          # Slack SSO may hand off from an external identity provider.
+          # Use the documented wildcard temporarily to cover that callback;
+          # narrow this to the actual provider once the flow is confirmed.
+          allowed_origins = [ "*" ];
+        }
+      ];
+      # Slack's SSO flow may use a redirect/popup before handing off to the
+      # desktop client's slack:// URL.
+      PopupsAllowedForUrls = [
+        "https://slack.com"
+        "https://app.slack.com"
+        "https://[*.]slack.com"
+      ];
+    };
   };
 
   environment.systemPackages = desktopPackages ++ [ sddmAstronaut ];
@@ -340,6 +362,27 @@ in
         enable = true;
         createDirectories = true;
       };
+
+      # Keep links opened by Thunderbird and other applications in Chromium.
+      # This also prevents the ChatGPT desktop app from becoming the default
+      # XDG browser when its desktop entry is installed.
+      xdg.mimeApps = {
+        enable = true;
+        defaultApplications = {
+          "text/html" = [ "chromium-browser.desktop" ];
+          "x-scheme-handler/http" = [ "chromium-browser.desktop" ];
+          "x-scheme-handler/https" = [ "chromium-browser.desktop" ];
+          "x-scheme-handler/slack" = [ "slack.desktop" ];
+          "x-scheme-handler/bitwarden" = [ "bitwarden.desktop" ];
+          "x-scheme-handler/codex" = [ "chatgpt.desktop" ];
+        };
+        associations.added = {
+          "x-scheme-handler/slack" = [ "slack.desktop" ];
+          "x-scheme-handler/bitwarden" = [ "bitwarden.desktop" ];
+          "x-scheme-handler/codex" = [ "chatgpt.desktop" ];
+        };
+      };
+      xdg.configFile."mimeapps.list".force = true;
 
       # Desktop applications live in the system package set above. Keep only
       # user-scoped tools here so the same packages are not declared twice.
@@ -373,74 +416,11 @@ in
       };
 
       home.sessionVariables = {
-        XDG_CURRENT_DESKTOP = "Hyprland";
-        XDG_SESSION_DESKTOP = "Hyprland";
         XDG_SESSION_TYPE = "wayland";
         QT_QPA_PLATFORM = "wayland;xcb";
         GDK_BACKEND = "wayland,x11,*";
         MOZ_ENABLE_WAYLAND = "1";
         NIXOS_OZONE_WL = "1";
-      };
-
-      services.voxtype = {
-        enable = true;
-        package = pkgs.voxtype-vulkan;
-        loadModels = [ "large-v3-turbo" ];
-        environment = {
-          # The daemon launches voxtype-osd by name. Keep the Voxtype package
-          # on PATH so the OSD frontend is discoverable from systemd too.
-          PATH = lib.makeBinPath [
-            pkgs.voxtype-vulkan
-            # Voxtype runs post-process and output hooks through `sh -c`.
-            # NixOS has no global /bin/sh, so keep a shell on the service PATH.
-            pkgs.bash
-            pkgs.coreutils
-            pkgs.which
-            pkgs.wl-clipboard
-            pkgs.wtype
-            pkgs.jq
-            pkgs.hyprland
-          ];
-          VOXTYPE_VULKAN_DEVICE = "amd";
-          # The user service can start before Hyprland imports its session
-          # environment. Give wtype the active Wayland socket explicitly.
-          WAYLAND_DISPLAY = "wayland-1";
-          DISPLAY = ":0";
-          XDG_CURRENT_DESKTOP = "Hyprland";
-          XDG_SESSION_TYPE = "wayland";
-        };
-        settings = {
-          hotkey.enabled = false;
-          whisper = {
-            model = "large-v3-turbo";
-            language = [ "uk" "en" ];
-            translate = false;
-          };
-          output = {
-            # Copy one normalized line and paste it as a single bracketed-paste
-            # operation. Ghostty remaps this layout-independent shortcut to the
-            # regular clipboard, so PRIMARY selection can never be pasted here.
-            mode = "paste";
-            paste_keys = "shift+insert";
-            pre_type_delay_ms = 200;
-            post_process = {
-              command = "${pkgs.coreutils}/bin/tr '\\r\\n' '  '";
-              timeout_ms = 5000;
-            };
-            auto_submit = false;
-            notification = {
-              on_recording_start = false;
-              on_recording_stop = false;
-              on_transcription = false;
-            };
-          };
-          osd = {
-            # The nixpkgs Voxtype package ships the launcher but not the
-            # GTK4/Quickshell frontend binaries. Our Quickshell shell hosts
-            # the state/audio HUD instead.
-            enabled = false;
-          };
-        };
       };
 
       home.file = {
@@ -476,6 +456,21 @@ in
             Type=Application
             Name=Handy
             Hidden=true
+          '';
+        };
+        # The old profile entry was a symlink to /usr/share/applications,
+        # which does not exist on NixOS. Keep Slack autostart declarative.
+        ".config/autostart/slack.desktop" = {
+          force = true;
+          text = ''
+            [Desktop Entry]
+            Type=Application
+            Name=Slack
+            Comment=Slack Desktop
+            Exec=slack
+            StartupNotify=true
+            Terminal=false
+            X-GNOME-Autostart-enabled=true
           '';
         };
         ".local/share/applications/bitwarden.desktop" = {

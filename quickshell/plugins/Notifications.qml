@@ -14,6 +14,10 @@ Item {
   readonly property bool doNotDisturb: dndState ? dndState.doNotDisturb : false
   property bool dndToastVisible: false
   property var liveNotifications: ({})
+  // Keep notification IDs stable so Notify(..., replaces_id, ...) updates the
+  // existing history item and popup instead of creating one item per battery
+  // percentage.
+  property var notificationIds: ({})
   readonly property int historyLimit: 50
 
   ListModel { id: popupModel }
@@ -49,6 +53,29 @@ Item {
 
   function addNotification(notification) {
     notification.tracked = true
+    var notificationId = String(notification.id || 0)
+    var existingUid = root.notificationIds[notificationId]
+    if (existingUid && root.liveNotifications[existingUid]) {
+      var updatedEntry = {
+        uid: existingUid,
+        app: String(notification.appName || "Notification"),
+        summary: plainText(notification.summary),
+        body: plainText(notification.body),
+        urgency: Number(notification.urgency || 0),
+        timestamp: Date.now()
+      }
+      for (var historyIndex = 0; historyIndex < historyModel.count; historyIndex++) {
+        if (historyModel.get(historyIndex).uid === existingUid) {
+          historyModel.set(historyIndex, updatedEntry)
+          break
+        }
+      }
+      var popupIndexValue = root.popupIndex(existingUid)
+      if (popupIndexValue >= 0) popupModel.set(popupIndexValue, updatedEntry)
+      root.liveNotifications[existingUid] = notification
+      return
+    }
+
     var timestamp = Date.now()
     var uid = String(notification.id || 0) + "-" + timestamp
     var entry = {
@@ -61,6 +88,10 @@ Item {
     }
 
     root.liveNotifications[uid] = notification
+    root.notificationIds[notificationId] = uid
+    try {
+      notification.closed.connect(function() { root.forgetNotification(uid) })
+    } catch (e) {}
     historyModel.insert(0, entry)
     while (historyModel.count > root.historyLimit) {
       var old = historyModel.get(historyModel.count - 1)
@@ -90,7 +121,19 @@ Item {
     var ref = root.liveNotifications[uid]
     if (!ref) return
     try { ref.tracked = false } catch (e) {}
+    delete root.notificationIds[String(ref.id || 0)]
     delete root.liveNotifications[uid]
+  }
+
+  function forgetNotification(uid) {
+    root.dismissPopup(uid)
+    for (var i = 0; i < historyModel.count; i++) {
+      if (historyModel.get(i).uid === uid) {
+        historyModel.remove(i)
+        break
+      }
+    }
+    root.release(uid)
   }
 
   function focusSource(uid) {
@@ -116,29 +159,27 @@ Item {
       try { ref.dismiss() } catch (e) {}
     }
 
-    root.dismissPopup(uid)
-    for (var i = 0; i < historyModel.count; i++) {
-      if (historyModel.get(i).uid === uid) {
-        historyModel.remove(i)
-        break
-      }
-    }
-    root.release(uid)
+    root.forgetNotification(uid)
   }
 
   function invokeDefault(uid) {
     var ref = root.liveNotifications[uid]
+    var defaultInvoked = false
     try {
       if (ref && ref.actions) {
         for (var i = 0; i < ref.actions.length; i++) {
           if (ref.actions[i] && ref.actions[i].identifier === "default") {
             ref.actions[i].invoke()
+            defaultInvoked = true
             break
           }
         }
       }
     } catch (e) {}
-    root.focusSource(uid)
+    // Ghostty's default action carries the exact originating surface ID.
+    // Only use our Hyprland heuristic for notifications that have no
+    // actionable default (for example plain notify-send messages).
+    if (!defaultInvoked) root.focusSource(uid)
     root.removeNotification(uid)
   }
 

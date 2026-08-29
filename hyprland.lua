@@ -105,8 +105,16 @@ local function cursorIsOverDesktop()
   end
 
   -- Quickshell panels and popups are layer surfaces rather than windows.
-  -- Ignore non-interactive layers such as the wallpaper layer.
+  -- The bar uses keyboardFocus=None, so its interactivity can be 0 even
+  -- though it still accepts pointer clicks. Match the bar explicitly before
+  -- filtering out genuinely non-interactive layers such as the wallpaper.
   for _, layer in ipairs(hl.get_layers()) do
+    if layer.mapped and layer.namespace == "nixos-shell-bar"
+      and cursor.x >= layer.x and cursor.x < layer.x + layer.w
+      and cursor.y >= layer.y and cursor.y < layer.y + layer.h then
+      return false
+    end
+
     if layer.mapped and layer.interactivity ~= 0
       and cursor.x >= layer.x and cursor.x < layer.x + layer.w
       and cursor.y >= layer.y and cursor.y < layer.y + layer.h then
@@ -268,7 +276,8 @@ hl.unbind(mod .. " + SHIFT + code:21")
 
 hl.bind(mod .. " + code:25", function()
   if activeWindowIsChromium() then
-    sendShortcutOnce("CTRL", "W")()
+    -- Use the physical W key so Ctrl+W remains Ctrl+W in the Ukrainian layout.
+    sendShortcutOnce("CTRL", "code:25")()
   else
     hl.dispatch(hl.dsp.window.close())
   end

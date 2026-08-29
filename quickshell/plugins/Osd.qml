@@ -13,7 +13,12 @@ Item {
   property int value: 0
   property string message: ""
   property string voxtypeState: "idle"
+  property string voxtypeModel: "large-v3-turbo"
   property real voxtypePeak: 0.0
+  property int voxtypeMaxDurationSecs: 300
+  property real voxtypeRemainingSecs: 300.0
+  property real voxtypeRecordingStartedAt: 0
+  readonly property int waveformBars: 24
 
   readonly property bool voxtypeActive: voxtypeState !== "idle" && voxtypeState !== ""
   readonly property bool voxtypeRecording: voxtypeState === "recording"
@@ -24,10 +29,15 @@ Item {
   readonly property string voxtypeLabel: voxtypeRecording
     ? "RECORDING"
     : (voxtypeTranscribing ? "TRANSCRIBING" : String(voxtypeState).toUpperCase())
+  readonly property string voxtypeModelLabel: voxtypeModel === "large-v3-turbo"
+    ? "whisper-large-v3-turbo"
+    : voxtypeModel
   readonly property string voxtypeStatePath: {
     var xdg = Quickshell.env("XDG_RUNTIME_DIR")
     return xdg && xdg.length > 0 ? xdg + "/voxtype/state" : "/run/user/1000/voxtype/state"
   }
+  readonly property string voxtypeModelPath: Quickshell.env("HOME") + "/.config/quickshell/voxtype-model"
+  readonly property string voxtypeTimeoutPath: Quickshell.env("HOME") + "/.config/quickshell/voxtype-timeout"
 
   readonly property string icon: {
     if (kind === "volume-muted") return ""
@@ -73,6 +83,25 @@ Item {
     if (next !== root.voxtypeState) root.voxtypeState = next
   }
 
+  function setVoxtypeModel(raw) {
+    var next = String(raw || "").trim()
+    if (next.length > 0) root.voxtypeModel = next
+  }
+
+  function setVoxtypeMaxDuration(raw) {
+    var next = Number(String(raw || "").trim())
+    if (isFinite(next) && next > 0) {
+      root.voxtypeMaxDurationSecs = Math.floor(next)
+      root.updateVoxtypeCountdown()
+    }
+  }
+
+  function updateVoxtypeCountdown() {
+    if (!root.voxtypeRecording || root.voxtypeRecordingStartedAt <= 0) return
+    var elapsed = (Date.now() - root.voxtypeRecordingStartedAt) / 1000
+    root.voxtypeRemainingSecs = Math.max(0, root.voxtypeMaxDurationSecs - elapsed)
+  }
+
   function handleVoxtypeAudio(raw) {
     try {
       var frame = JSON.parse(String(raw || "").trim())
@@ -98,6 +127,24 @@ Item {
     onFileChanged: reload()
   }
 
+  FileView {
+    path: root.voxtypeModelPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.setVoxtypeModel(text())
+    onLoadFailed: root.voxtypeModel = "large-v3-turbo"
+    onFileChanged: reload()
+  }
+
+  FileView {
+    path: root.voxtypeTimeoutPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.setVoxtypeMaxDuration(text())
+    onLoadFailed: root.voxtypeMaxDurationSecs = 300
+    onFileChanged: reload()
+  }
+
   Process {
     id: voxtypeAudioBridge
     command: ["voxtype-audio-bridge"]
@@ -114,7 +161,16 @@ Item {
   }
 
   onVoxtypeStateChanged: {
-    if (!root.voxtypeRecording) root.voxtypePeak = 0.0
+    if (root.voxtypeRecording) {
+      root.voxtypeRecordingStartedAt = Date.now()
+      root.voxtypeRemainingSecs = root.voxtypeMaxDurationSecs
+      voxtypeCountdownTimer.restart()
+    } else {
+      root.voxtypeRecordingStartedAt = 0
+      root.voxtypeRemainingSecs = root.voxtypeMaxDurationSecs
+      root.voxtypePeak = 0.0
+      voxtypeCountdownTimer.stop()
+    }
   }
 
   Timer {
@@ -122,6 +178,14 @@ Item {
     repeat: true
     running: root.voxtypeRecording && root.voxtypePeak < 0.01
     onTriggered: root.voxtypePeak = 0.12
+  }
+
+  Timer {
+    id: voxtypeCountdownTimer
+    interval: 100
+    repeat: true
+    running: root.voxtypeRecording
+    onTriggered: root.updateVoxtypeCountdown()
   }
 
   Timer {
@@ -271,23 +335,47 @@ Item {
           width: parent.width - 56
           spacing: 6
 
-          Text {
-            text: "MIC  ·  " + root.voxtypeLabel
-            color: root.theme ? root.theme.foreground : "#c0caf5"
-            font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
-            font.pixelSize: 13
-            font.bold: true
+          Row {
+            id: voxtypeHeader
+            width: parent.width
+            spacing: 8
+
+            Text {
+              width: Math.max(0, voxtypeHeader.width - voxtypeStatus.implicitWidth - voxtypeHeader.spacing)
+              text: root.voxtypeModelLabel
+              elide: Text.ElideRight
+              maximumLineCount: 1
+              wrapMode: Text.NoWrap
+              color: root.theme ? root.theme.foreground : "#c0caf5"
+              font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
+              font.pixelSize: 13
+              font.bold: true
+            }
+
+            Text {
+              id: voxtypeStatus
+              width: implicitWidth
+              text: root.voxtypeRecording
+                ? root.voxtypeRemainingSecs.toFixed(1) + "s left"
+                : "·  " + root.voxtypeLabel
+              color: root.theme ? root.theme.foreground : "#c0caf5"
+              font.family: root.theme ? root.theme.fontFamily : "JetBrainsMono Nerd Font"
+              font.pixelSize: 13
+              font.bold: true
+            }
           }
 
           Row {
+            id: waveform
+            width: parent.width
             height: 25
             spacing: 3
 
             Repeater {
-              model: 18
+              model: root.waveformBars
 
               Rectangle {
-                width: 5
+                width: Math.max(1, (waveform.width - waveform.spacing * (root.waveformBars - 1)) / root.waveformBars)
                 height: root.voxtypeRecording
                   ? Math.max(6, Math.min(25, 6 + root.voxtypePeak * 19 + ((index * 5) % 4)))
                   : 6
