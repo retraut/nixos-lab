@@ -1,0 +1,93 @@
+#!/bin/sh
+
+set -eu
+
+file_path=${1:-}
+width=${2:-80}
+height=${3:-25}
+
+[ -n "$file_path" ] || exit 0
+
+have() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+show_text() {
+  if have bat; then
+    bat --style=plain --color=always --paging=never --line-range=":${height}" -- "$file_path" 2>/dev/null
+  else
+    head -n "$height" -- "$file_path"
+  fi
+}
+
+show_image() {
+  if have chafa; then
+    chafa --format=symbols --size="${width}x${height}" --animate=off --polite=on -- "$file_path"
+  elif have file; then
+    file -bL -- "$file_path"
+  fi
+}
+
+show_pdf() {
+  if have pdftoppm && have chafa; then
+    preview_dir=$(mktemp -d "${TMPDIR:-/tmp}/nnn-preview.XXXXXX")
+    preview_image="$preview_dir/page.png"
+    cleanup() {
+      rm -f -- "$preview_image"
+      rmdir -- "$preview_dir" 2>/dev/null || true
+    }
+    trap cleanup EXIT HUP INT TERM
+
+    if pdftoppm -f 1 -l 1 -singlefile -png -scale-to 1600 -- "$file_path" "$preview_dir/page" >/dev/null 2>&1; then
+      chafa --format=symbols --size="${width}x${height}" --animate=off --polite=on -- "$preview_image"
+      return
+    fi
+  fi
+
+  if have pdftotext; then
+    pdftotext -f 1 -l 1 -nopgbrk -q -- "$file_path" - 2>/dev/null | head -n "$height"
+  elif have file; then
+    file -bL -- "$file_path"
+  fi
+}
+
+if [ -d "$file_path" ]; then
+  if have tree; then
+    tree -L 1 -C --dirsfirst --noreport -- "$file_path" 2>/dev/null | head -n "$height"
+  else
+    find "$file_path" -maxdepth 1 -print 2>/dev/null | head -n "$height"
+  fi
+  exit 0
+fi
+
+extension=${file_path##*.}
+extension=$(printf '%s' "$extension" | tr '[:upper:]' '[:lower:]')
+
+case "$extension" in
+  pdf)
+    show_pdf
+    exit 0
+    ;;
+  jpg|jpeg|png|gif|webp|bmp|tif|tiff|avif|heic|ico|svg)
+    show_image
+    exit 0
+    ;;
+esac
+
+if have file; then
+  mime_type=$(file -bL --mime-type -- "$file_path" 2>/dev/null || true)
+  case "$mime_type" in
+    application/pdf)
+      show_pdf
+      exit 0
+      ;;
+    image/*)
+      show_image
+      exit 0
+      ;;
+  esac
+fi
+
+if [ -f "$file_path" ]; then
+  show_text
+fi

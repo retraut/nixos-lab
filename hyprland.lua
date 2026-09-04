@@ -272,6 +272,9 @@ hl.bind("XF86KbdBrightnessDown", hl.dsp.exec_cmd(home .. "/.local/bin/nixos-kbd-
 hl.bind("code:156", hl.dsp.exec_cmd("voxtype record toggle"), { description = "Toggle Voxtype transcription" })
 hl.bind(mod .. " + W", hl.dsp.window.close(), { description = "Close window" })
 hl.bind(mod .. " + F", hl.dsp.window.fullscreen(0), { description = "Fullscreen" })
+-- Keep Alt+F available as a global fullscreen toggle. Use the physical key
+-- code so it remains reliable while the Ukrainian layout is active.
+hl.bind("ALT + code:33", hl.dsp.window.fullscreen(0), { description = "Fullscreen (Alt+F)" })
 hl.bind(mod .. " + T", hl.dsp.window.float({ action = "toggle" }), { description = "Toggle floating" })
 hl.bind(mod .. " + LEFT", hl.dsp.layout("focus l"), { description = "Focus previous carousel window" })
 hl.bind(mod .. " + RIGHT", hl.dsp.layout("focus r"), { description = "Focus next carousel window" })

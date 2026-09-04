@@ -20,6 +20,10 @@ Item {
   property string heldModifier: ""
   property var closeTarget: null
   property var groups: []
+  // Remember the most recently focused toplevel for every application. This
+  // lets app switching return to the same window after cycling windows with
+  // Alt/Super+`.
+  property var lastWindowByApp: ({})
 
   readonly property int normalGap: Math.max(4, Math.min(14, Math.floor((panel.width - 72) / Math.max(1, root.groups.length * 12))))
   readonly property int cardWidth: root.overviewMode
@@ -82,6 +86,23 @@ Item {
     var entry = root.entryFor(id)
     var icon = entry && entry.icon ? String(entry.icon) : "application-x-executable"
     return Quickshell.iconPath(icon, true)
+  }
+
+  function rememberActiveWindow() {
+    var active = ToplevelManager.activeToplevel
+    var id = root.appIdFor(active)
+    if (!active || !id || active.parent) return
+    root.lastWindowByApp[id] = active
+  }
+
+  function preferredWindow(group) {
+    if (!group || group.windows.length === 0) return null
+
+    var remembered = root.lastWindowByApp[group.id]
+    for (var i = 0; i < group.windows.length; i++) {
+      if (group.windows[i] === remembered) return remembered
+    }
+    return group.windows[0]
   }
 
   function refreshGroups() {
@@ -251,7 +272,8 @@ Item {
     var target = root.groups[targetIndex]
     if (!target || target.windows.length === 0) return
     if (root.opened) root.cancel()
-    target.windows[0].activate()
+    var targetWindow = root.preferredWindow(target)
+    if (targetWindow) targetWindow.activate()
   }
 
   function nextApp() { root.cycleApp(1) }
@@ -296,7 +318,7 @@ Item {
   function commit() {
     if (!root.opened || root.groups.length === 0) return
     var group = root.groups[root.selectedIndex]
-    var target = group && group.windows.length > 0 ? group.windows[0] : null
+    var target = root.preferredWindow(group)
     root.cancel()
     if (target) Qt.callLater(function() { target.activate() })
   }
@@ -337,6 +359,12 @@ Item {
 
   Component.onCompleted: {
     root.refreshGroups()
+    root.rememberActiveWindow()
+  }
+
+  Connections {
+    target: ToplevelManager
+    function onActiveToplevelChanged() { root.rememberActiveWindow() }
   }
 
   Connections {

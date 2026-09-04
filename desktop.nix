@@ -258,15 +258,6 @@ let
     "PATH=/home/${labUserName}/.local/bin:/etc/profiles/per-user/${labUserName}/bin:/run/current-system/sw/bin:${userServicePath}";
 in
 {
-  # xremap reads physical keyboard events and emits a virtual keyboard. Keep
-  # the access declarative so the per-device profiles work without running a
-  # user service as root.
-  hardware.uinput.enable = true;
-  users.users.${labUserName}.extraGroups = [ "input" "uinput" ];
-  services.udev.extraRules = ''
-    KERNEL=="uinput", GROUP="input", TAG+="uaccess"
-  '';
-
   # The compositor/session is ours. Quickshell is the only Omarchy-adjacent
   # Local runtime piece; no Omarchy CLI or Arch-specific shell runtime
   # is imported into NixOS.
@@ -431,9 +422,15 @@ in
         GDK_BACKEND = "wayland,x11,*";
         MOZ_ENABLE_WAYLAND = "1";
         NIXOS_OZONE_WL = "1";
+        # Codex Security's MCP launcher otherwise selects its cached generic
+        # Linux Node runtime, which cannot run directly on NixOS.
+        CODEX_MCP_NODE_PATH = "${pkgs.nodejs}/bin/node";
       };
 
       home.file = {
+        # Keep the repository-managed Codex maintenance skill discoverable by
+        # Codex through the user's declarative skills directory.
+        ".agents/skills/codex/SKILL.md".source = ./skills/codex/SKILL.md;
         # Wi-Fi and Bluetooth are managed by the Quickshell control center.
         # Override the system XDG autostart entries so their legacy tray
         # applets stay hidden while NetworkManager, BlueZ and the advanced
@@ -497,6 +494,19 @@ in
             Version=1.5
           '';
         };
+        ".local/share/applications/com.openai.codex.desktop".text = ''
+          [Desktop Entry]
+          Name=Codex
+          Comment=OpenAI Codex CLI
+          Exec=ghostty --class=com.openai.codex --title=Codex -e codex
+          Path=/home/${labUserName}/Work
+          Icon=codex
+          Terminal=false
+          Type=Application
+          Categories=Development;Utility;
+          StartupNotify=true
+        '';
+        ".local/share/icons/hicolor/scalable/apps/codex.svg".source = ./assets/icons/codex.svg;
         ".config/autostart/bitwarden.desktop" = {
           force = true;
           text = ''
@@ -549,68 +559,6 @@ in
         ".config/hypr/hypridle.conf".source = ./hypridle.conf;
         ".config/quickshell/shell.qml".source = ./quickshell/shell.qml;
         ".config/quickshell/AppSwitcher.qml".source = ./quickshell/AppSwitcher.qml;
-        ".config/xremap/mac.yml".text = ''
-          # PC keyboards: Alt is our Cmd-like modifier outside terminals.
-          # Apple keyboards: the physical Command key is Linux Super/Meta.
-          # Device matching intentionally excludes Apple devices from the PC
-          # profile so their Option key remains a normal Alt/Option key.
-          keymap:
-            - name: "PC Cmd shortcuts"
-              device:
-                not: ["Apple", "Magic Keyboard"]
-              application:
-                not: [/ghostty|foot|alacritty|kitty|wezterm|terminal|org\.gnome\.Console/]
-              remap:
-                Alt-C: Ctrl-C
-                Alt-V: Ctrl-V
-                Alt-X: Ctrl-X
-                Alt-A: Ctrl-A
-                Alt-Z: Ctrl-Z
-                Alt-Shift-Z: Ctrl-Shift-Z
-                Alt-F: Ctrl-F
-                Alt-L: Ctrl-L
-                Alt-Q: Ctrl-Q
-                Alt-R: Ctrl-R
-                Alt-S: Ctrl-S
-                Alt-P: Ctrl-P
-
-            - name: "PC browser Cmd shortcuts"
-              device:
-                not: ["Apple", "Magic Keyboard"]
-              application:
-                only: [/^(chromium|chromium-browser|google-chrome|google-chrome-stable|brave-browser|microsoft-edge)(\.|$)/]
-              remap:
-                Alt-T: Ctrl-T
-                Alt-W: Ctrl-W
-
-            - name: "Apple Cmd shortcuts"
-              device:
-                only: ["Apple", "Magic Keyboard"]
-              application:
-                not: [/ghostty|foot|alacritty|kitty|wezterm|terminal|org\.gnome\.Console/]
-              remap:
-                Super-C: Ctrl-C
-                Super-V: Ctrl-V
-                Super-X: Ctrl-X
-                Super-A: Ctrl-A
-                Super-Z: Ctrl-Z
-                Super-Shift-Z: Ctrl-Shift-Z
-                Super-F: Ctrl-F
-                Super-L: Ctrl-L
-                Super-Q: Ctrl-Q
-                Super-R: Ctrl-R
-                Super-S: Ctrl-S
-                Super-P: Ctrl-P
-
-            - name: "Apple browser Cmd shortcuts"
-              device:
-                only: ["Apple", "Magic Keyboard"]
-              application:
-                only: [/^(chromium|chromium-browser|google-chrome|google-chrome-stable|brave-browser|microsoft-edge)(\.|$)/]
-              remap:
-                Super-T: Ctrl-T
-                Super-W: Ctrl-W
-        '';
         ".config/quickshell/app-launcher.qml".source = ./quickshell/app-launcher.qml;
         ".config/quickshell/control-center.qml".source = ./quickshell/control-center.qml;
         ".config/quickshell/control-panel.qml".source = ./quickshell/control-panel.qml;
@@ -787,21 +735,6 @@ in
           };
           Service = {
             ExecStart = "${pkgs.hypridle}/bin/hypridle -c %h/.config/hypr/hypridle.conf";
-            Restart = "on-failure";
-            RestartSec = 1;
-            Environment = [ userServiceEnvironment ];
-          };
-          Install.WantedBy = [ "graphical-session.target" ];
-        };
-
-        nixos-xremap = {
-          Unit = {
-            Description = "Mac-style keyboard semantics for the NixOS desktop";
-            PartOf = [ "graphical-session.target" ];
-            After = [ "graphical-session.target" ];
-          };
-          Service = {
-            ExecStart = "${pkgs.xremap.hyprland}/bin/xremap --watch=device,config %h/.config/xremap/mac.yml";
             Restart = "on-failure";
             RestartSec = 1;
             Environment = [ userServiceEnvironment ];

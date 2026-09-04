@@ -16,6 +16,9 @@ ShellRoot {
   readonly property int captionSize: 13
   readonly property int sectionSize: 14
   readonly property int titleSize: 20
+  readonly property int compactWidth: 420
+  readonly property int compactPadding: 16
+  readonly property int compactSpacing: 8
   property int resetTick: 0
 
   Timer {
@@ -104,10 +107,10 @@ ShellRoot {
 
     Rectangle {
       id: card
-      implicitWidth: content.implicitWidth + theme.popupPadding * 2
-      implicitHeight: content.implicitHeight + theme.popupPadding * 2
-      width: Math.min(theme.popupWidth, panel.width - theme.popupEdgeMargin * 2)
-      height: Math.min(Math.max(420, implicitHeight), panel.height - theme.popupTopMargin - theme.popupEdgeMargin)
+      implicitWidth: content.implicitWidth + root.compactPadding * 2
+      implicitHeight: content.implicitHeight + root.compactPadding * 2
+      width: Math.min(root.compactWidth, panel.width - theme.popupEdgeMargin * 2)
+      height: Math.min(Math.max(360, implicitHeight), panel.height - theme.popupTopMargin - theme.popupEdgeMargin)
       anchors.top: parent.top
       anchors.right: parent.right
       anchors.topMargin: theme.popupTopMargin
@@ -126,26 +129,26 @@ ShellRoot {
       ColumnLayout {
         id: content
         anchors.fill: parent
-        anchors.margins: theme.popupPadding
-        spacing: 14
+        anchors.margins: root.compactPadding
+        spacing: root.compactSpacing
 
         RowLayout {
           Layout.fillWidth: true
-          spacing: 12
+          spacing: 10
 
           Image {
             source: Qt.resolvedUrl("assets/agents/codex.svg")
-            sourceSize.width: 38
-            sourceSize.height: 38
-            Layout.preferredWidth: 38
-            Layout.preferredHeight: 38
+            sourceSize.width: 30
+            sourceSize.height: 30
+            Layout.preferredWidth: 30
+            Layout.preferredHeight: 30
             fillMode: Image.PreserveAspectFit
           }
 
           Column {
-            spacing: 1
-            Text { text: "Codex"; color: theme.foreground; font.pixelSize: root.titleSize; font.weight: Font.Medium }
-            Text { text: root.usage.tierLabel || "Subscription"; color: theme.foreground; font.pixelSize: root.bodySize; font.weight: Font.Medium }
+            spacing: 0
+            Text { text: "Codex"; color: theme.foreground; font.pixelSize: 18; font.weight: Font.Medium }
+            Text { text: root.usage.tierLabel || "Subscription"; color: theme.foreground; font.pixelSize: 12; font.weight: Font.Medium }
           }
 
           Item { Layout.fillWidth: true }
@@ -160,7 +163,7 @@ ShellRoot {
           delegate: ColumnLayout {
             required property var modelData
             Layout.fillWidth: true
-            spacing: 6
+            spacing: 3
 
             RowLayout {
               Layout.fillWidth: true
@@ -171,7 +174,7 @@ ShellRoot {
 
             Rectangle {
               Layout.fillWidth: true
-              implicitHeight: 5
+              implicitHeight: 4
               color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.20)
               Rectangle { width: parent.width * Math.max(0, Math.min(1, Number(modelData.percent || 0))); height: parent.height; color: theme.foreground }
             }
@@ -179,7 +182,7 @@ ShellRoot {
             Text {
               text: { root.resetTick; return root.formatReset(modelData.resetsAt) }
               color: theme.muted
-              font.pixelSize: root.captionSize
+              font.pixelSize: 11
             }
           }
         }
@@ -187,29 +190,64 @@ ShellRoot {
         Rectangle { visible: (root.usage.recentDays || []).length > 0; Layout.fillWidth: true; implicitHeight: 1; color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.16) }
         Text { visible: (root.usage.recentDays || []).length > 0; text: "TOKENS BY DAY"; color: theme.foreground; font.pixelSize: root.sectionSize; font.weight: Font.Medium }
 
-        Repeater {
-          model: root.usage.recentDays || []
-          delegate: RowLayout {
-            required property var modelData
-            Layout.fillWidth: true
-            spacing: 10
-            Text { Layout.preferredWidth: 56; text: modelData.date === root.usage.recentDays[root.usage.recentDays.length - 1].date ? "Today" : modelData.date.slice(5); color: theme.foreground; font.pixelSize: root.captionSize }
-            Rectangle {
+        RowLayout {
+          visible: (root.usage.recentDays || []).length > 0
+          Layout.fillWidth: true
+          Layout.preferredHeight: 92
+          spacing: 6
+
+          Repeater {
+            model: root.usage.recentDays || []
+            delegate: ColumnLayout {
+              required property var modelData
               Layout.fillWidth: true
-              implicitHeight: 5
-              color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.20)
-              Rectangle {
-                width: {
-                  var peak = 1
-                  var days = root.usage.recentDays || []
-                  for (var i = 0; i < days.length; i++) peak = Math.max(peak, Number(days[i].messageCount || 0))
-                  return parent.width * Number(modelData.messageCount || 0) / peak
+              Layout.fillHeight: true
+              spacing: 3
+
+              Text {
+                Layout.fillWidth: true
+                text: root.formatTokens(modelData.messageCount)
+                color: theme.foreground
+                font.pixelSize: 10
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+              }
+
+              Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: 42
+
+                Rectangle {
+                  anchors.horizontalCenter: parent.horizontalCenter
+                  anchors.bottom: parent.bottom
+                  width: 18
+                  height: parent.height
+                  color: Qt.rgba(theme.foreground.r, theme.foreground.g, theme.foreground.b, 0.20)
                 }
-                height: parent.height
-                color: theme.muted
+
+                Rectangle {
+                  anchors.horizontalCenter: parent.horizontalCenter
+                  anchors.bottom: parent.bottom
+                  width: 18
+                  height: {
+                    var peak = 1
+                    var days = root.usage.recentDays || []
+                    for (var i = 0; i < days.length; i++) peak = Math.max(peak, Number(days[i].messageCount || 0))
+                    return parent.height * Number(modelData.messageCount || 0) / peak
+                  }
+                  color: theme.muted
+                }
+              }
+
+              Text {
+                Layout.fillWidth: true
+                text: modelData.date === root.usage.recentDays[root.usage.recentDays.length - 1].date ? "Today" : modelData.date.slice(5)
+                color: theme.foreground
+                font.pixelSize: 10
+                horizontalAlignment: Text.AlignHCenter
               }
             }
-            Text { Layout.preferredWidth: 48; horizontalAlignment: Text.AlignRight; text: root.formatTokens(modelData.messageCount); color: theme.foreground; font.pixelSize: root.captionSize }
           }
         }
 
@@ -221,8 +259,8 @@ ShellRoot {
           delegate: RowLayout {
             required property var modelData
             Layout.fillWidth: true
-            Text { Layout.fillWidth: true; text: modelData.name; color: theme.foreground; font.pixelSize: root.bodySize; elide: Text.ElideRight }
-            Text { text: root.formatTokens(modelData.total); color: theme.foreground; font.pixelSize: root.bodySize }
+            Text { Layout.fillWidth: true; text: modelData.name; color: theme.foreground; font.pixelSize: 13; elide: Text.ElideRight }
+            Text { text: root.formatTokens(modelData.total); color: theme.foreground; font.pixelSize: 13 }
           }
         }
 

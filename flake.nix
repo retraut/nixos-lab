@@ -37,6 +37,8 @@
       commonModules = [
         ./configuration.nix
         ./desktop.nix
+        ./macos-keybindings.nix
+        ./mac-keyboard-profile.nix
         ./voxtype.nix
         stylix.nixosModules.stylix
         ./theme.nix

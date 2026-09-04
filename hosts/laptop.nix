@@ -12,6 +12,13 @@ in
 {
   networking.hostName = "zephyrus";
 
+  # Use compressed RAM as a fast safety net under memory pressure.
+  zramSwap = {
+    enable = true;
+    algorithm = "zstd";
+    priority = 100;
+  };
+
   # Let systemd-cryptsetup in the initrd consume a TPM2 token enrolled in the
   # cryptroot LUKS2 header. The passphrase remains available as fallback.
   # Enrollment itself is intentionally a manual post-install operation.

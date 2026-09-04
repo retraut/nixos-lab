@@ -173,7 +173,7 @@ Item {
       fontFamily: root.barFontFamily
       onActivated: Quickshell.execDetached(["sh", "-lc", "exec \"$HOME/.local/bin/nixos-agents\""])
       onLaunchRequested: Quickshell.execDetached([
-        "ghostty", "--title=Codex", "-e", "sh", "-lc",
+        "ghostty", "--class=com.openai.codex", "--title=Codex", "-e", "sh", "-lc",
         "cd \"$HOME/Work\" && exec codex"
       ])
     }

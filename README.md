@@ -46,6 +46,8 @@ The VM and laptop layers are deliberately separate. In particular,
 flake.nix                         flake inputs and host outputs
 configuration.nix                 shared NixOS base
 desktop.nix                       Hyprland/Quickshell/Home Manager desktop
+macos-keybindings.nix             xremap macOS-style shortcuts for all apps
+mac-keyboard-profile.nix          separate Apple/Magic Keyboard profile
 theme.nix                         Stylix and generated theme configuration
 lockscreen.nix                    Hyprlock integration
 voxtype.nix                       voice transcription service
@@ -84,8 +86,8 @@ minimum, review and replace:
    `hosts/`.
 3. Generated hardware configuration for the target machine.
 4. Laptop-specific GPU bus IDs, fingerprint support, disk layout, and TPM policy.
-5. Personal application choices and key bindings in `desktop.nix` and
-   `hyprland.lua`.
+5. Personal application choices and key bindings in `desktop.nix`,
+   `macos-keybindings.nix`, `mac-keyboard-profile.nix`, and `hyprland.lua`.
 
 Do not copy credentials into Nix files. The laptop profile reads a root-only
 password hash from `/etc`, and runtime Wi-Fi secrets remain in NetworkManager.

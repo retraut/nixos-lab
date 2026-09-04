@@ -4,14 +4,15 @@
 , makeBinaryWrapper
 , bubblewrap
 , ripgrep
+, nodejs
 }:
 
 stdenvNoCC.mkDerivation rec {
   pname = "codex";
-  version = "0.150.1";
+  version = "0.153.3";
 
-  codexHash = "sha256-qzCIcLx/wEjCPcSdA/a4r5zn/Jm52ogtZoi+epAVXHo=";
-  hostHash = "sha256-tHZnhGElzfbbxGDG/cQYr7LvOSbFT02Zm7++sI3uT8U=";
+  codexHash = "sha256-b/lnS7AOFHNMJ0i8h4jqs8tuWsU+vefh54C07Xr0jLo=";
+  hostHash = "sha256-EK5jMEXSjZ1dzWqnXYSYaOPOn+pu9OZp61HRJMaa71M=";
 
   codexSrc = fetchurl {
     url = "https://github.com/openai/codex/releases/download/rust-v${version}/codex-x86_64-unknown-linux-musl.tar.gz";
@@ -35,7 +36,9 @@ stdenvNoCC.mkDerivation rec {
   '';
 
   postFixup = ''
-    wrapProgram "$out/bin/codex" --prefix PATH : "${lib.makeBinPath [ bubblewrap ripgrep ]}"
+    wrapProgram "$out/bin/codex" \
+      --set CODEX_MCP_NODE_PATH "${nodejs}/bin/node" \
+      --prefix PATH : "${lib.makeBinPath [ bubblewrap ripgrep ]}"
   '';
 
   meta = {

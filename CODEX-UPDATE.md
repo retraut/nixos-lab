@@ -8,7 +8,7 @@ does not compile Rust or download Cargo dependencies.
 
 ```bash
 cd ~/.config/nixos
-./scripts/update-codex
+bash ./scripts/update-codex
 ```
 
 The helper reads the latest `rust-v*` release tag from GitHub, downloads the
@@ -16,7 +16,7 @@ matching Linux archives to calculate their SHAs, updates `codex.nix`, and
 verifies the complete NixOS build. To pin a specific release:
 
 ```bash
-./scripts/update-codex rust-v0.148.0
+bash ./scripts/update-codex rust-v0.153.3
 ```
 
 After a successful update, activate it with:

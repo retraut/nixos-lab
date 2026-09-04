@@ -72,6 +72,20 @@ US and Ukrainian layouts. The application launcher uses one proportional
 | `Print` / `Super+Print` / `Shift+Print` | Region / active window / full-screen capture |
 | `Super+1…0` | Select workspace 1…10; add `Shift` to move the active window |
 
+`macos-keybindings.nix` provides the PC macOS-style application layer through
+xremap. On a PC keyboard, `Alt` acts as Command: `Alt+C/V/X/A/Z/S/F/L/R/P/Q`
+cover the usual copy, paste, editing, find, address-bar, refresh, print and
+quit actions. In Chromium, `Alt+R` refreshes, `Alt+T` opens a tab, `Alt+W`
+closes a tab, `Alt+N` opens a window, `Alt+1…9` selects tabs, and
+`Alt+Shift+[ / ]` switches tabs. In Ghostty, `Alt+C/V` use the terminal
+clipboard shortcuts while physical `Ctrl+C` remains SIGINT; `Alt+Q` quits the
+terminal application. Slack also gets `Alt+K` quick switch and `Alt+1…0`
+workspace switching.
+
+Physical Apple and Magic Keyboards are kept in the separate
+`mac-keyboard-profile.nix`; their Command key is reported as `Super` by Linux,
+so that profile translates `Super` only for those named devices.
+
 Media keys control volume, microphone mute, and brightness through the custom
 OSD.
 
