@@ -141,7 +141,7 @@ Item {
     if (!ref) return
 
     var source = [ref.appName, ref.desktopEntry, ref.summary, ref.body].join(" ").toLowerCase()
-    if (!source.match(/ghostty|codex/)) return
+    if (!source.match(/ghostty|codex|org\.retraut|nnn/)) return
 
     Quickshell.execDetached([
       Quickshell.env("HOME") + "/.local/bin/nixos-desktop-daemon",

@@ -24,6 +24,8 @@ Item {
   // lets app switching return to the same window after cycling windows with
   // Alt/Super+`.
   property var lastWindowByApp: ({})
+  // Most-recently-used application order for the quick Alt+Tab toggle.
+  property var recentAppIds: []
 
   readonly property int normalGap: Math.max(4, Math.min(14, Math.floor((panel.width - 72) / Math.max(1, root.groups.length * 12))))
   readonly property int cardWidth: root.overviewMode
@@ -88,11 +90,25 @@ Item {
     return Quickshell.iconPath(icon, true)
   }
 
+  function isNnnGroup(group) {
+    if (!group) return false
+    var id = String(group.id || "").toLowerCase()
+    var name = String(group.name || "").toLowerCase()
+    return id === "nnn" || id === "org.retraut.nnn" || name === "nnn"
+  }
+
   function rememberActiveWindow() {
     var active = ToplevelManager.activeToplevel
     var id = root.appIdFor(active)
     if (!active || !id || active.parent) return
     root.lastWindowByApp[id] = active
+
+    var history = root.recentAppIds || []
+    var index = history.indexOf(id)
+    if (index >= 0) history.splice(index, 1)
+    history.unshift(id)
+    if (history.length > 32) history.length = 32
+    root.recentAppIds = history
   }
 
   function preferredWindow(group) {
@@ -136,9 +152,14 @@ Item {
       }
     }
 
-    // Keep navigation deterministic: Alt+Tab and horizontal gestures use
-    // the same case-insensitive alphabetical app order every time.
+    // Keep navigation deterministic, with nnn as the persistent first app.
+    // The explicit id/name checks also keep the ordering stable while an old
+    // nnn window from before a configuration reload is still open.
     next.sort(function(a, b) {
+      var leftIsNnn = root.isNnnGroup(a)
+      var rightIsNnn = root.isNnnGroup(b)
+      if (leftIsNnn !== rightIsNnn) return leftIsNnn ? -1 : 1
+
       var left = String(a.name).toLowerCase()
       var right = String(b.name).toLowerCase()
       if (left < right) return -1
@@ -189,11 +210,60 @@ Item {
   }
 
   function altTab() {
-    root.nextApp()
+    if (root.opened && root.heldModifier === "alt") {
+      root.selectRelative(1)
+      return
+    }
+
+    // Keep the quick Alt+Tab path instant. If Alt remains held, the timer
+    // upgrades the interaction to the full switcher overlay.
+    root.toggleRecentApp()
   }
 
   function altShiftTab() {
+    if (root.opened && root.heldModifier === "alt") {
+      root.selectRelative(-1)
+      return
+    }
+
     root.previousApp()
+  }
+
+  function openAlt() {
+    if (!root.opened) root.open("alt", 0)
+  }
+
+  function toggleRecentApp() {
+    root.refreshGroups()
+    if (root.groups.length < 2) return
+
+    var activeId = root.appIdFor(ToplevelManager.activeToplevel)
+    var history = root.recentAppIds || []
+    var targetId = ""
+    for (var i = 0; i < history.length; i++) {
+      if (history[i] !== activeId) {
+        for (var j = 0; j < root.groups.length; j++) {
+          if (root.groups[j].id === history[i]) {
+            targetId = history[i]
+            break
+          }
+        }
+      }
+      if (targetId) break
+    }
+
+    if (!targetId) {
+      root.nextApp()
+      return
+    }
+
+    for (var k = 0; k < root.groups.length; k++) {
+      var target = root.groups[k]
+      if (target.id !== targetId) continue
+      var targetWindow = root.preferredWindow(target)
+      if (targetWindow) targetWindow.activate()
+      return
+    }
   }
 
   function commandTab() {
@@ -336,6 +406,8 @@ Item {
     function nextApp(): void { root.nextApp() }
     function previousApp(): void { root.previousApp() }
     function commitCommand(): void { root.commitModifier("command") }
+    function commitAlt(): void { root.commitModifier("alt") }
+    function openAlt(): void { root.openAlt() }
     function overview(): void { root.overview() }
     function cancel(): void { root.cancel() }
   }

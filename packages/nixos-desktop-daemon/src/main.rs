@@ -240,7 +240,11 @@ fn main() {
 
 fn focus_notification(source_args: &[String]) {
     let source = source_args.join(" ").to_lowercase();
-    if !source.contains("ghostty") && !source.contains("codex") {
+    if !source.contains("ghostty")
+        && !source.contains("codex")
+        && !source.contains("org.retraut")
+        && !source.contains("nnn")
+    {
         return;
     }
 
@@ -259,15 +263,26 @@ fn focus_notification(source_args: &[String]) {
                 .collect::<Vec<_>>()
                 .join(" ")
                 .to_lowercase();
-            if !window_text.contains("ghostty") {
+            // The launcher gives terminal tools their own Wayland app IDs
+            // (for example com.openai.codex and org.retraut.nnn), so matching
+            // only the default Ghostty class silently drops those windows.
+            let terminal_window = window_text.contains("ghostty")
+                || window_text.contains("com.openai.codex")
+                || window_text.contains("org.retraut")
+                || window_text.contains("nnn")
+                || window_text.contains("alacritty")
+                || window_text.contains("kitty")
+                || window_text.contains("wezterm")
+                || window_text.contains("terminal");
+            if !terminal_window {
                 return None;
             }
 
             // Notifications do not carry a stable Wayland window address.
             // Prefer a matching title when one is present, then choose the
-            // most recently focused *unfocused* Ghostty. This maps the common
-            // case where a job finishes in the terminal we just left while
-            // another Ghostty window is currently active.
+            // most recently focused *unfocused* terminal. This maps the
+            // common case where a job finishes in the terminal we just left
+            // while another terminal window is currently active.
             let summary = source_args
                 .get(2)
                 .map(|value| value.to_lowercase())
@@ -306,23 +321,12 @@ fn focus_notification(source_args: &[String]) {
     });
 
     let Some((_, _, _, _, address)) = candidates.into_iter().next() else { return; };
-    // Hyprland's Lua config expects the Lua dispatcher form first. Keep the
-    // legacy dispatcher as a fallback for older Hyprland releases.
-    let lua_dispatch = format!(
-        "hl.dsp.focus({{ window = \"address:{address}\" }})"
-    );
-    let focused = Command::new("hyprctl")
-        .args(["dispatch", lua_dispatch.as_str()])
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false);
-
-    if !focused {
-        let _ = Command::new("hyprctl")
-            .args(["dispatch", "focuswindow"])
-            .arg(format!("address:{address}"))
-            .status();
-    }
+    // Use Hyprland's native address selector so this focuses the exact
+    // originating top-level window, rather than merely switching apps.
+    let _ = Command::new("hyprctl")
+        .args(["dispatch", "focuswindow"])
+        .arg(format!("address:{address}"))
+        .status();
 }
 
 fn widgets_are_active() -> bool {

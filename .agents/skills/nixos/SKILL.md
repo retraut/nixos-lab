@@ -14,6 +14,7 @@ This skill applies to the personal NixOS configuration at `/home/retraut/.config
 - The user always performs the actual rebuild or activation themselves.
 - Codex may inspect files, edit the configuration when requested, and run non-mutating validation.
 - Codex must not run `nixos-rebuild switch`, `boot`, or `test`; must not invoke `sudo` or `pkexec` for activation; and must not run installation, partitioning, formatting, Disko, or other destructive system operations.
+- An explicit user request to “run the rebuild” does not authorize activation: explain the boundary and continue with safe validation plus the exact manual handoff command.
 - When a change is ready, report what was checked and give the exact command the user can run manually. Treat that command as a handoff, not as permission to execute it.
 
 ## Repository facts
@@ -44,10 +45,14 @@ For example:
 - `env XDG_CACHE_HOME=/tmp/codex-nixos-cache nix eval --raw /home/retraut/.config/nixos#nixosConfigurations.laptop.config.system.stateVersion`
 - `env XDG_CACHE_HOME=/tmp/codex-nixos-cache nix build --no-link /home/retraut/.config/nixos#nixosConfigurations.<host>.config.system.build.toplevel`
 
-If the sandbox cannot access `/nix/var/nix/daemon-socket/socket` or the Nix
-store database, retry the same read-only check with the sandbox escalation
-request. Do not use `NIX_REMOTE=local` as a workaround and do not broaden the
-permission request to activation commands.
+Nix checks and builds normally contact `/nix/var/nix/daemon-socket/socket` and
+the Nix store database. Request sandbox escalation **before** running these
+commands when the current sandbox profile does not already grant that access;
+do not first spend a turn attempting the command in the restricted sandbox.
+If a check was already attempted and failed with “cannot connect to socket” or
+similar sandbox denial, immediately retry the same read-only command with the
+escalation request. Do not use `NIX_REMOTE=local` as a workaround and do not
+broaden the permission request to activation commands.
 
 Building a derivation is verification only; never switch to or boot the result. If a check needs network access, elevated permissions, or would mutate the running system, stop and ask the user to run it or explicitly provide a safe alternative.
 

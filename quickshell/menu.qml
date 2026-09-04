@@ -16,7 +16,7 @@ ShellRoot {
   readonly property int detailFontSize: 12
 
   readonly property var items: [
-    { title: "Rebuild NixOS", detail: "Apply config without restarting the GUI", icon: "󰚰", command: ["ghostty", "--title=NixOS Rebuild", "-e", Quickshell.env("HOME") + "/.local/bin/nixos-rebuild"] },
+    { title: "Rebuild NixOS", detail: "Apply config without restarting the GUI", icon: "󰚰", command: ["ghostty", "--class=org.retraut.nixos-rebuild", "--title=NixOS Rebuild", "-e", Quickshell.env("HOME") + "/.local/bin/nixos-rebuild"] },
     // This is intentionally separate from the rebuild action, but calls the
     // shell's in-process reload so other GUI applications stay untouched.
     { title: "Restart shell", detail: "Reload only Quickshell; keep apps open", icon: "󰑐", command: ["quickshell", "ipc", "--path", Quickshell.env("HOME") + "/.config/quickshell/shell.qml", "call", "nixos-shell", "reload"] },

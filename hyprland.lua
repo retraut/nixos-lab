@@ -96,9 +96,20 @@ hl.window_rule({
   workspace = "1",
 })
 
--- Keep scrolling columns alphabetically ordered as applications are opened.
+-- Keep GNOME Sushi as a centered Quick Look overlay over the nnn terminal.
+-- The fallback class covers older Sushi builds that report a short app ID.
+hl.window_rule({
+  name = "centered-sushi-preview",
+  match = { class = "^(org\\.gnome\\.NautilusPreviewer|sushi)$" },
+  float = true,
+  center = true,
+  size = "70% override 50% override",
+  no_initial_focus = true,
+})
+
+-- Keep scrolling columns in the preferred order as applications are opened.
 -- The scrolling layout inserts new windows by launch order, so this small
--- event-driven sorter moves the newly opened column beside its alphabetic
+-- event-driven sorter moves the newly opened column beside its sorted
 -- neighbors without changing the layout itself.
 local webAppSortNames = {
   ["x.com"] = "x.com",
@@ -108,6 +119,24 @@ local webAppSortNames = {
 
 local function windowSortName(window)
   local class = string.lower(window.initialClass or window.class or "")
+  local title = string.lower(window.title or "")
+
+  -- Keep the main workflow windows in the preferred left-to-right order.
+  -- Use numeric prefixes so this remains explicit instead of depending on
+  -- the applications' window classes sorting alphabetically.
+  if class:find("nnn", 1, true) or title:find("nnn", 1, true) then
+    return "01-nnn"
+  end
+  if class:find("chatgpt", 1, true) or title:find("chatgpt", 1, true) then
+    return "02-chatgpt"
+  end
+  if class:find("codex", 1, true) or title:find("codex", 1, true) then
+    return "03-codex"
+  end
+  if class:find("rebuild", 1, true) or title:find("rebuild", 1, true) then
+    return "04-rebuild"
+  end
+
   local webHost = class:match("^chrome%-(.-)__")
   if webHost then
     webHost = webHost:gsub("^www%.", "")
@@ -118,6 +147,20 @@ local function windowSortName(window)
   if class:find("slack", 1, true) then return "slack" end
   if class:find("chrom", 1, true) then return "chromium" end
   return class:gsub("[^%w]+", " ")
+end
+
+local function windowSortPriority(window)
+  -- nnn is the anchor window and must always remain the leftmost column.
+  return windowSortName(window) == "01-nnn" and 0 or 1
+end
+
+local function windowComesBefore(left, right)
+  local leftPriority = windowSortPriority(left)
+  local rightPriority = windowSortPriority(right)
+  if leftPriority ~= rightPriority then
+    return leftPriority < rightPriority
+  end
+  return windowSortName(left) < windowSortName(right)
 end
 
 local function scheduleAlphabeticPlacement(window)
@@ -154,13 +197,12 @@ local function scheduleAlphabeticPlacement(window)
     end
     if not activeIndex then return end
 
-    local activeName = windowSortName(active)
     local left = columns[activeIndex - 1]
     local right = columns[activeIndex + 1]
-    if left and activeName < windowSortName(left) then
+    if left and windowComesBefore(active, left) then
       hl.dispatch(hl.dsp.layout("swapcol l"))
       hl.timer(placeWindow, { timeout = 35, type = "oneshot" })
-    elseif right and activeName > windowSortName(right) then
+    elseif right and windowComesBefore(right, active) then
       hl.dispatch(hl.dsp.layout("swapcol r"))
       hl.timer(placeWindow, { timeout = 35, type = "oneshot" })
     end
@@ -281,16 +323,56 @@ hl.bind(mod .. " + RIGHT", hl.dsp.layout("focus r"), { description = "Focus next
 hl.bind(mod .. " + UP", hl.dsp.focus({ direction = "up" }), { description = "Focus up" })
 hl.bind(mod .. " + DOWN", hl.dsp.focus({ direction = "down" }), { description = "Focus down" })
 
--- Alt+Tab is intentionally a direct app cycle, matching Alt+` below. The
--- Quickshell overlay remains available for Mission Control and Command+Tab.
--- Keep both physical modifiers available for the overlay paths.
+-- Alt+Tab switches immediately; if Alt stays held, Quickshell promotes the
+-- interaction to the overlay after a short delay. Releasing Alt commits the
+-- currently selected app/window from that overlay.
 local shellPath = home .. "/.config/quickshell/shell.qml"
 local function appSwitcherCall(method)
   return hl.dsp.exec_cmd("quickshell ipc --path " .. shellPath .. " call nixos-app-switcher " .. method)
 end
 
-hl.bind("ALT + TAB", appSwitcherCall("altTab"), { description = "App switcher" })
-hl.bind("ALT + SHIFT + TAB", appSwitcherCall("altShiftTab"), { description = "Previous app" })
+local altHoldTimer = nil
+local altHoldGeneration = 0
+
+local function altIsDown()
+  return hl.is_key_down("Alt_L") or hl.is_key_down("Alt_R")
+end
+
+local function cancelAltHold()
+  altHoldGeneration = altHoldGeneration + 1
+  if altHoldTimer then
+    altHoldTimer:set_enabled(false)
+    altHoldTimer = nil
+  end
+end
+
+local function armAltHold()
+  cancelAltHold()
+  local generation = altHoldGeneration
+  altHoldTimer = hl.timer(function()
+    if generation == altHoldGeneration and altIsDown() then
+      hl.exec_cmd("quickshell ipc --path " .. shellPath .. " call nixos-app-switcher openAlt")
+    end
+    altHoldTimer = nil
+  end, { timeout = 200, type = "oneshot" })
+end
+
+local function altTabBinding(method)
+  return function()
+    hl.dispatch(appSwitcherCall(method))
+    armAltHold()
+  end
+end
+
+local function commitAlt()
+  cancelAltHold()
+  hl.dispatch(appSwitcherCall("commitAlt"))
+end
+
+hl.bind("ALT + TAB", altTabBinding("altTab"), { description = "App switcher" })
+hl.bind("ALT + SHIFT + TAB", altTabBinding("altShiftTab"), { description = "Previous app" })
+hl.bind("ALT + ALT_L", commitAlt, { release = true, description = "Commit app switcher (Alt)" })
+hl.bind("ALT + ALT_R", commitAlt, { release = true, description = "Commit app switcher (AltGr)" })
 hl.bind("SUPER + TAB", appSwitcherCall("commandTab"), { description = "App switcher (Command)" })
 hl.bind("SUPER + SHIFT + TAB", appSwitcherCall("commandShiftTab"), { description = "Previous app (Command)" })
 hl.bind("SUPER", appSwitcherCall("commitCommand"), { release = true, description = "Commit app switcher (Command)" })
@@ -323,8 +405,16 @@ local function activeWindowIsTerminal()
   local window = hl.get_active_window()
   if not window then return false end
 
-  local class = string.lower(window.class or window.initialClass or "")
-  if class:find("ghostty", 1, true) or class:find("foot", 1, true) or class:find("terminal", 1, true) then
+  -- Wayland does not expose the parent terminal process here. Our terminal
+  -- launchers therefore use stable app classes, which we classify alongside
+  -- Ghostty for clipboard and terminal-only keybindings.
+  local class = string.lower((window.class or "") .. " " .. (window.initialClass or ""))
+  if class:find("ghostty", 1, true)
+    or class:find("com.openai.codex", 1, true)
+    or class:find("org.retraut.", 1, true)
+    or class:find("nnn", 1, true)
+    or class:find("nnn-preview", 1, true)
+    or class:find("terminal", 1, true) then
     return true
   end
 

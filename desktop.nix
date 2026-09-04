@@ -1,6 +1,14 @@
 { config, pkgs, lib, labUserName, ... }:
 
 let
+  nnn = pkgs.nnn.overrideAttrs (old: {
+    patches = (old.patches or []) ++ [ ./packages/nnn-space-preview.patch ];
+    postInstall = (old.postInstall or "") + ''
+      # Keep nnn's generic package desktop entry out of the user profile;
+      # the desktop profile below provides the Ghostty launcher instead.
+      rm -f "$out/share/applications/nnn.desktop"
+    '';
+  });
   codex = pkgs.callPackage ./codex.nix { };
   commandCode = pkgs.callPackage ./packages/command-code.nix { };
   desktopDaemon = pkgs.rustPlatform.buildRustPackage {
@@ -9,6 +17,13 @@ let
     src = ./packages/nixos-desktop-daemon;
     cargoLock.lockFile = ./packages/nixos-desktop-daemon/Cargo.lock;
     meta.mainProgram = "nixos-desktop-daemon";
+  };
+  previewDaemon = pkgs.rustPlatform.buildRustPackage {
+    pname = "nnn-preview-daemon";
+    version = "0.1.0";
+    src = ./packages/nnn-preview-daemon;
+    cargoLock.lockFile = ./packages/nnn-preview-daemon/Cargo.lock;
+    meta.mainProgram = "nnn-preview-daemon";
   };
 
   # OpenAI's official Linux ChatGPT/Codex app is distributed as a Debian
@@ -113,7 +128,9 @@ let
     }
 
     case "$window_class" in
-      *ghostty*|*foot*|*alacritty*|*kitty*|*wezterm*|*terminal*)
+      # These apps are terminal-like even though they use their own Alt-Tab
+      # class, so paste through the terminal path just like Ghostty.
+      *ghostty*|*com.openai.codex*|*org.retraut.*|*nnn*|*alacritty*|*kitty*|*wezterm*|*terminal*)
         send_shortcut "SHIFT" "Insert"
         ;;
       *)
@@ -209,7 +226,7 @@ let
     eza
     gnome-keyring
     thunderbird
-    screenfetch
+    fastfetch
     hyprsunset
     wlsunset
     hypridle
@@ -303,6 +320,8 @@ in
   security.rtkit.enable = true;
 
   services.gnome.gnome-keyring.enable = true;
+  # Quick Look-style file preview for Nautilus (Spacebar).
+  services.gnome.sushi.enable = true;
   services.upower.enable = true;
 
   services.pipewire = {
@@ -385,9 +404,9 @@ in
       };
       xdg.configFile."mimeapps.list".force = true;
 
-      # Desktop applications live in the system package set above. Keep only
-      # user-scoped tools here so the same packages are not declared twice.
-      home.packages = [ codex commandCode pkgs.nodejs ];
+      # Keep nnn user-scoped so its generic package desktop entry does not
+      # become a second system application alongside our Ghostty launcher.
+      home.packages = [ codex commandCode nnn previewDaemon pkgs.nodejs ];
 
       programs.bash = {
         enable = true;
@@ -397,6 +416,7 @@ in
           ll = "eza -la";
           exa = "eza";
           lt = "eza --tree --level=2 --long --icons --git";
+          nnn = "NNN_FIFO=/run/user/1000/nnn-preview.fifo nnn";
           restore_my_init_nixos_configuration = "sudo nixos-rebuild switch --flake /etc/nixos#laptop";
         };
       };
@@ -422,12 +442,24 @@ in
         GDK_BACKEND = "wayland,x11,*";
         MOZ_ENABLE_WAYLAND = "1";
         NIXOS_OZONE_WL = "1";
+        # Let the preview daemon follow nnn's hovered path without stealing
+        # keyboard focus from nnn.
+        NNN_FIFO = "/run/user/1000/nnn-preview.fifo";
+        # Space is remapped in the Nix-patched nnn package to open Sushi.
         # Codex Security's MCP launcher otherwise selects its cached generic
         # Linux Node runtime, which cannot run directly on NixOS.
         CODEX_MCP_NODE_PATH = "${pkgs.nodejs}/bin/node";
       };
 
       home.file = {
+        # Keep nnn's preview entirely inside the main terminal pane. The
+        # package's stock .npreview only renders PDF text and expects img2txt
+        # for images, while this local version uses chafa and pdftoppm.
+        ".config/nnn/plugins/.npreview" = {
+          source = ./packages/nnn-preview;
+          executable = true;
+        };
+        ".config/nnn/plugins/nuke".source = "${pkgs.nnn}/share/plugins/nuke";
         # Keep the repository-managed Codex maintenance skill discoverable by
         # Codex through the user's declarative skills directory.
         ".agents/skills/codex/SKILL.md".source = ./skills/codex/SKILL.md;
@@ -507,6 +539,35 @@ in
           StartupNotify=true
         '';
         ".local/share/icons/hicolor/scalable/apps/codex.svg".source = ./assets/icons/codex.svg;
+        ".local/share/applications/org.retraut.nixos-rebuild.desktop".text = ''
+          [Desktop Entry]
+          Name=NixOS Rebuild
+          Comment=Rebuild the active NixOS configuration
+          Exec=ghostty --class=org.retraut.nixos-rebuild --title=NixOS Rebuild -e /home/${labUserName}/.local/bin/nixos-rebuild
+          Path=/home/${labUserName}/.config/nixos
+          Icon=nixos
+          Terminal=false
+          Type=Application
+          Categories=System;Utility;
+          StartupNotify=true
+        '';
+        ".local/share/icons/hicolor/scalable/apps/nixos.svg".source = ./assets/icons/nixos.svg;
+        # GTK requires Ghostty's custom Wayland app ID to be reverse-DNS
+        # formatted. A bare `nnn` is rejected and falls back to Ghostty.
+        ".local/share/applications/org.retraut.nnn.desktop".text = ''
+          [Desktop Entry]
+          Name=nnn
+          Comment=Terminal file manager with Wayland preview
+          Exec=env NNN_FIFO=/run/user/1000/nnn-preview.fifo ghostty --class=org.retraut.nnn --title=nnn -e nnn
+          Path=/home/${labUserName}/Work
+          Icon=nnn
+          Terminal=false
+          Type=Application
+          Categories=System;FileManager;Utility;
+          StartupWMClass=org.retraut.nnn
+          StartupNotify=true
+        '';
+        ".local/share/icons/hicolor/scalable/apps/nnn.svg".source = ./assets/icons/nnn.svg;
         ".config/autostart/bitwarden.desktop" = {
           force = true;
           text = ''
@@ -708,6 +769,24 @@ in
             Restart = "on-failure";
             RestartSec = 1;
             Environment = [ userServiceEnvironment ];
+          };
+          Install.WantedBy = [ "graphical-session.target" ];
+        };
+
+        nnn-preview-daemon = {
+          Unit = {
+            Description = "Sushi preview controller for nnn";
+            PartOf = [ "graphical-session.target" ];
+            After = [ "graphical-session.target" ];
+          };
+          Service = {
+            ExecStart = "${previewDaemon}/bin/nnn-preview-daemon";
+            Restart = "on-failure";
+            RestartSec = 1;
+            Environment = [
+              userServiceEnvironment
+              "NNN_FIFO=/run/user/1000/nnn-preview.fifo"
+            ];
           };
           Install.WantedBy = [ "graphical-session.target" ];
         };

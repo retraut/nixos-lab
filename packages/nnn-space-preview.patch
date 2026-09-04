@@ -1,5 +1,34 @@
 --- a/src/nnn.h
 +++ b/src/nnn.h
-@@
+@@ -113,6 +113,7 @@
+ 	SEL_SESSIONS,
+ 	SEL_EXPORT,
+ 	SEL_TIMETYPE,
++	SEL_SUSHI,
+ 	SEL_PREVIEW,
+ 	SEL_QUITCTX,
+ 	SEL_QUITCD,
+@@ -218,7 +219,7 @@
+ 	/* Redraw window */
+ 	{ CONTROL('L'),   SEL_REDRAW },
+ 	/* Select current file path */
 -	{ ' ',            SEL_SEL },
-+	{ ' ',            SEL_PREVIEW },
++	{ ' ',            SEL_SUSHI },
+ 	{ '+',            SEL_SEL },
+ 	/* Toggle select multiple files */
+ 	{ 'm',            SEL_SELMUL },
+--- a/src/nnn.c
++++ b/src/nnn.c
+@@ -9092,6 +9092,12 @@
+ 				goto begin;
+ 			}
+ 			goto nochange;
++		case SEL_SUSHI:
++			if (ndents) {
++				mkpath(path, pdents[cur].name, newpath);
++				spawn("nnn-preview-daemon", newpath, NULL, NULL, F_MULTI | F_NOWAIT | F_NOTRACE);
++			}
++			continue;
+ 		case SEL_MFLTR: // fallthrough
+ 		case SEL_HIDDEN: // fallthrough
+ 		case SEL_DETAIL: // fallthrough

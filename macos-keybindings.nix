@@ -20,22 +20,21 @@ let
         device:
           not: ["Apple", "Magic Keyboard"]
         application:
-          not: [/ghostty|com\.mitchellh\.ghostty|foot|alacritty|kitty|wezterm|terminal|org\.gnome\.Console|org\.gnome\.Terminal|org\.gnome\.Ptyxis|konsole|tilix|terminator|xterm|urxvt|st/]
+          not: [/ghostty|com\.mitchellh\.ghostty|com\.openai\.codex|codex|org\.retraut\.|nixos-rebuild|nnn-preview|alacritty|kitty|wezterm|terminal|org\.gnome\.Console|org\.gnome\.Terminal|org\.gnome\.Ptyxis|konsole|tilix|terminator|xterm|urxvt|st/]
         remap:
           Alt-C: Ctrl-C
           Alt-V: Ctrl-V
 
-      # Terminal rules deliberately keep Ctrl+C as SIGINT.
-      # Ghostty and the other terminal emulators use Ctrl+Shift+C/V for the
-      # clipboard, so Alt+C/V can behave like Cmd+C/V without losing signals.
+      # Terminal rules deliberately keep Ctrl+C as SIGINT. The Insert chords
+      # are Ghostty's explicit clipboard actions and match the Super+V helper.
       - name: "PC macOS shortcuts in terminals"
         device:
           not: ["Apple", "Magic Keyboard"]
         application:
-          only: [/ghostty|com\.mitchellh\.ghostty|foot|alacritty|kitty|wezterm|terminal|org\.gnome\.Console|org\.gnome\.Terminal|org\.gnome\.Ptyxis|konsole|tilix|terminator|xterm|urxvt|st/]
+          only: [/ghostty|com\.mitchellh\.ghostty|com\.openai\.codex|codex|org\.retraut\.|nixos-rebuild|nnn-preview|alacritty|kitty|wezterm|terminal|org\.gnome\.Console|org\.gnome\.Terminal|org\.gnome\.Ptyxis|konsole|tilix|terminator|xterm|urxvt|st/]
         remap:
-          Alt-C: Ctrl-Shift-C
-          Alt-V: Ctrl-Shift-V
+          Alt-C: Ctrl-Insert
+          Alt-V: Shift-Insert
           Alt-T: Ctrl-Shift-T
           Alt-W: Ctrl-Shift-W
           Alt-N: Ctrl-Shift-N
@@ -49,7 +48,7 @@ let
           not: ["Apple", "Magic Keyboard"]
         application:
           not:
-            - /ghostty|com\.mitchellh\.ghostty|foot|alacritty|kitty|wezterm|terminal|org\.gnome\.Console|org\.gnome\.Terminal|org\.gnome\.Ptyxis|konsole|tilix|terminator|xterm|urxvt|st/
+            - /ghostty|com\.mitchellh\.ghostty|com\.openai\.codex|codex|org\.retraut\.|nixos-rebuild|nnn-preview|alacritty|kitty|wezterm|terminal|org\.gnome\.Console|org\.gnome\.Terminal|org\.gnome\.Ptyxis|konsole|tilix|terminator|xterm|urxvt|st/
             - /^(chromium|chromium-browser|google-chrome|google-chrome-stable|brave-browser|microsoft-edge|firefox|vivaldi|opera)(\.|$)/
             - /^(slack|Slack|com\.slack\.Slack)(\.|$)/
         remap:

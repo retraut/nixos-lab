@@ -11,7 +11,7 @@ let
         device:
           only: ["Apple", "Magic Keyboard"]
         application:
-          only: [/ghostty|com\.mitchellh\.ghostty|foot|alacritty|kitty|wezterm|terminal|org\.gnome\.Console|org\.gnome\.Terminal|org\.gnome\.Ptyxis|konsole|tilix|terminator|xterm|urxvt|st/]
+          only: [/ghostty|com\.mitchellh\.ghostty|com\.openai\.codex|codex|org\.retraut\.|nixos-rebuild|nnn-preview|alacritty|kitty|wezterm|terminal|org\.gnome\.Console|org\.gnome\.Terminal|org\.gnome\.Ptyxis|konsole|tilix|terminator|xterm|urxvt|st/]
         remap:
           Super-C: Ctrl-Shift-C
           Super-V: Ctrl-Shift-V
@@ -28,7 +28,7 @@ let
           only: ["Apple", "Magic Keyboard"]
         application:
           not:
-            - /ghostty|com\.mitchellh\.ghostty|foot|alacritty|kitty|wezterm|terminal|org\.gnome\.Console|org\.gnome\.Terminal|org\.gnome\.Ptyxis|konsole|tilix|terminator|xterm|urxvt|st/
+            - /ghostty|com\.mitchellh\.ghostty|com\.openai\.codex|codex|org\.retraut\.|nixos-rebuild|nnn-preview|alacritty|kitty|wezterm|terminal|org\.gnome\.Console|org\.gnome\.Terminal|org\.gnome\.Ptyxis|konsole|tilix|terminator|xterm|urxvt|st/
             - /^(chromium|chromium-browser|google-chrome|google-chrome-stable|brave-browser|microsoft-edge|firefox|vivaldi|opera)(\.|$)/
         remap:
           Super-C: Ctrl-C
