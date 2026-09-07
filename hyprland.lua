@@ -96,6 +96,15 @@ hl.window_rule({
   workspace = "1",
 })
 
+-- Ghostty's notification default action presents the originating surface,
+-- including the correct window/tab when several terminals are open. Allow
+-- that activation for Ghostty and our Ghostty-based desktop launchers.
+hl.window_rule({
+  name = "ghostty-notification-activation",
+  match = { class = "^(com\\.mitchellh\\.ghostty|ghostty|com\\.openai\\.codex|org\\.retraut\\.(nnn|nixos-rebuild))$" },
+  focus_on_activate = true,
+})
+
 -- Keep GNOME Sushi as a centered Quick Look overlay over the nnn terminal.
 -- The fallback class covers older Sushi builds that report a short app ID.
 hl.window_rule({

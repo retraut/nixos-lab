@@ -94,9 +94,7 @@ Item {
     } catch (e) {}
     historyModel.insert(0, entry)
     while (historyModel.count > root.historyLimit) {
-      var old = historyModel.get(historyModel.count - 1)
-      root.release(old.uid)
-      historyModel.remove(historyModel.count - 1)
+      root.removeNotification(historyModel.get(historyModel.count - 1).uid)
     }
 
     if (!root.doNotDisturb) {
@@ -117,14 +115,6 @@ Item {
     if (index >= 0) popupModel.remove(index)
   }
 
-  function release(uid) {
-    var ref = root.liveNotifications[uid]
-    if (!ref) return
-    try { ref.tracked = false } catch (e) {}
-    delete root.notificationIds[String(ref.id || 0)]
-    delete root.liveNotifications[uid]
-  }
-
   function forgetNotification(uid) {
     root.dismissPopup(uid)
     for (var i = 0; i < historyModel.count; i++) {
@@ -133,60 +123,47 @@ Item {
         break
       }
     }
-    root.release(uid)
-  }
-
-  function focusSource(uid) {
     var ref = root.liveNotifications[uid]
-    if (!ref) return
-
-    var source = [ref.appName, ref.desktopEntry, ref.summary, ref.body].join(" ").toLowerCase()
-    if (!source.match(/ghostty|codex|org\.retraut|nnn/)) return
-
-    Quickshell.execDetached([
-      Quickshell.env("HOME") + "/.local/bin/nixos-desktop-daemon",
-      "focus-notification",
-      String(ref.appName || ""),
-      String(ref.desktopEntry || ""),
-      String(ref.summary || ""),
-      String(ref.body || "")
-    ])
+    if (ref) delete root.notificationIds[String(ref.id || 0)]
+    delete root.liveNotifications[uid]
   }
 
   function removeNotification(uid) {
     var ref = root.liveNotifications[uid]
+    // Detach before dismiss(): closed is synchronous and may re-enter us.
+    // Never set tracked=false from the closed handler or close a dead object.
+    root.forgetNotification(uid)
     if (ref) {
       try { ref.dismiss() } catch (e) {}
     }
-
-    root.forgetNotification(uid)
   }
 
   function invokeDefault(uid) {
+    // The history overlay owns exclusive keyboard focus. Release it before
+    // asking the sender to activate its originating window.
+    root.centerOpen = false
     var ref = root.liveNotifications[uid]
-    var defaultInvoked = false
     try {
       if (ref && ref.actions) {
         for (var i = 0; i < ref.actions.length; i++) {
           if (ref.actions[i] && ref.actions[i].identifier === "default") {
             ref.actions[i].invoke()
-            defaultInvoked = true
             break
           }
         }
       }
     } catch (e) {}
-    // Ghostty's default action carries the exact originating surface ID.
-    // Only use our Hyprland heuristic for notifications that have no
-    // actionable default (for example plain notify-send messages).
-    if (!defaultInvoked) root.focusSource(uid)
+    // The sender owns the window identity. In particular, Ghostty's default
+    // action carries its exact surface ID. Plain notify-send has no such
+    // identity: guessing by title or focus history can select another window.
+    // invoke() may already have closed a non-resident notification; removal
+    // is idempotent and also dismisses resident/no-action notifications.
     root.removeNotification(uid)
   }
 
   function clearHistory() {
     while (historyModel.count > 0) {
-      root.release(historyModel.get(0).uid)
-      historyModel.remove(0)
+      root.removeNotification(historyModel.get(0).uid)
     }
     popupModel.clear()
   }
@@ -309,6 +286,8 @@ Item {
 
             Column {
               id: toastContent
+              // Keep the close button above the card-wide click target.
+              z: 1
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: parent.top
@@ -480,6 +459,7 @@ Item {
 
             Column {
               id: historyContent
+              z: 1
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: parent.top
